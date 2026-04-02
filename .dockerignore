@@ -1,0 +1,11 @@
+.git
+.github
+.claude
+venv
+__pycache__
+*.pyc
+*.pyo
+.pytest_cache
+remember.md
+review_report.md
+.DS_Store

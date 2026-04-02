@@ -1,0 +1,33 @@
+venv/
+__pycache__/
+*.pyc
+*.pyo
+.env
+# Full scale CSVs — too large for git
+# Regenerate with: python generate_full.py
+data/raw/trips_full.csv
+data/raw/trips_full_fraud.csv
+data/raw/drivers_full.csv
+data/raw/customers_full.csv
+
+# Other generated data
+data/masked/*.csv
+data/blind_test/*.csv
+
+# Model weights — committed for Railway deployment (Option A)
+# To regenerate: python train.py
+model/weights/*.ubj
+.DS_Store
+.pytest_cache/
+*.egg-info/
+dist/
+build/
+.claude/settings.local.json
+remember.md
+review_report.md
+.claude
+.claude/
+_archive/data/raw/trips_full.csv
+.claude
+.claude/
+_archive/

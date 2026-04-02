@@ -1,0 +1,18 @@
+{
+  "zones_trained": [
+    "blr_whitefield",
+    "blr_koramangala",
+    "blr_hsr",
+    "blr_indiranagar",
+    "blr_jayanagar",
+    "blr_hebbal",
+    "blr_yeshwanthpur",
+    "blr_electronic_city",
+    "blr_bannerghatta",
+    "blr_marathahalli",
+    "blr_btm",
+    "blr_rajajinagar"
+  ],
+  "trained_at": "2026-03-26T06:59:57.856051",
+  "hours_ahead": 24
+}

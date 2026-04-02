@@ -1,0 +1,595 @@
+"""
+Porter Intelligence Platform — ML Inference Endpoints
+
+All fraud scoring, demand forecasting, and KPI endpoints.
+Registered as an APIRouter in api/main.py.
+"""
+
+import pandas as pd
+from datetime import datetime
+from typing import Dict
+
+from fastapi import APIRouter, HTTPException
+
+from api.schemas import (
+    TripScoreRequest, TripScoreResponse,
+    HeatmapResponse, LiveFeedResponse,
+    KPISummaryResponse, DriverRiskResponse,
+    ZoneFraudRate, FraudFeedItem,
+)
+from api.state import app_state
+from database.connection import AsyncSessionLocal
+from database.models import FraudCase
+
+router = APIRouter()
+
+
+@router.get(
+    "/fraud/heatmap",
+    response_model=HeatmapResponse,
+)
+async def fraud_heatmap():
+    """
+    Zone-level fraud rate heatmap for the live map.
+    Returns fraud rate per zone with risk classification.
+    """
+    trips_df = app_state.get("trips_df", pd.DataFrame())
+    zones    = app_state.get("zones", {})
+
+    if trips_df.empty:
+        raise HTTPException(
+            status_code=503,
+            detail="Trip data not loaded",
+        )
+
+    zone_stats = (
+        trips_df.groupby("pickup_zone_id")
+        .agg(
+            total_trips  = ("trip_id", "count"),
+            fraud_count  = ("is_fraud", "sum"),
+        )
+        .reset_index()
+    )
+    zone_stats["fraud_rate"] = (
+        zone_stats["fraud_count"] / zone_stats["total_trips"]
+    )
+
+    zone_items = []
+    for _, row in zone_stats.iterrows():
+        zid  = row["pickup_zone_id"]
+        zone = zones.get(zid)
+        if zone is None:
+            continue
+
+        rate = float(row["fraud_rate"])
+        risk = (
+            "CRITICAL" if rate > 0.12 else
+            "HIGH"     if rate > 0.08 else
+            "MEDIUM"   if rate > 0.04 else
+            "LOW"
+        )
+
+        zone_items.append(ZoneFraudRate(
+            zone_id     = zid,
+            zone_name   = zone.name,
+            city        = zone.city,
+            lat         = zone.lat,
+            lon         = zone.lon,
+            fraud_rate  = round(rate, 4),
+            fraud_count = int(row["fraud_count"]),
+            risk_level  = risk,
+        ))
+
+    return HeatmapResponse(
+        zones        = zone_items,
+        total_trips  = int(trips_df.shape[0]),
+        total_fraud  = int(trips_df["is_fraud"].sum()),
+        generated_at = datetime.now().isoformat(),
+    )
+
+
+@router.get(
+    "/fraud/live-feed",
+    response_model=LiveFeedResponse,
+)
+async def fraud_live_feed(limit: int = 50):
+    """
+    Last N fraud-flagged trips for the live activity feed.
+    Sorted by most recent first.
+    """
+    trips_df = app_state.get("trips_df", pd.DataFrame())
+
+    if trips_df.empty:
+        return LiveFeedResponse(items=[], total_shown=0)
+
+    fraud_df = trips_df[trips_df["is_fraud"] == True].copy()
+    fraud_df = fraud_df.sort_values(
+        "requested_at", ascending=False,
+    ).head(limit)
+
+    items = []
+    for _, row in fraud_df.iterrows():
+        items.append(FraudFeedItem(
+            trip_id    = str(row["trip_id"]),
+            driver_id  = str(row["driver_id"])[:8] + "...",
+            zone_id    = str(row["pickup_zone_id"]),
+            fraud_type = str(row["fraud_type"]),
+            confidence = float(row.get(
+                "fraud_confidence_score", 0.75,
+            )),
+            fare_inr       = float(row["fare_inr"]),
+            recoverable    = float(row.get(
+                "recoverable_amount_inr", 0,
+            )),
+            flagged_at = str(row["requested_at"]),
+        ))
+
+    return LiveFeedResponse(
+        items       = items,
+        total_shown = len(items),
+    )
+
+
+@router.get(
+    "/fraud/driver/{driver_id}",
+    response_model=DriverRiskResponse,
+)
+async def driver_risk(driver_id: str):
+    """
+    Risk profile for a specific driver.
+    Used for drill-down in the dashboard.
+    """
+    trips_df   = app_state.get("trips_df", pd.DataFrame())
+    drivers_df = app_state.get("drivers_df", pd.DataFrame())
+
+    driver_trips = trips_df[
+        trips_df["driver_id"] == driver_id
+    ] if not trips_df.empty else pd.DataFrame()
+
+    if driver_trips.empty:
+        return DriverRiskResponse(
+            driver_id         = driver_id,
+            risk_score        = 0.0,
+            risk_level        = "UNKNOWN",
+            recent_fraud_rate = 0.0,
+            cancel_velocity   = 0.0,
+            ring_member       = False,
+            recommendation    = "No data available for this driver.",
+        )
+
+    fraud_rate = float(driver_trips["is_fraud"].mean())
+    cancel_rate = float(
+        driver_trips["status"].isin([
+            "cancelled_by_driver",
+        ]).mean()
+    )
+
+    # Check ring membership
+    ring_member = False
+    if not drivers_df.empty:
+        drv_row = drivers_df[
+            drivers_df["driver_id"] == driver_id
+        ]
+        if not drv_row.empty and "fraud_ring_id" in drv_row.columns:
+            ring_member = pd.notna(
+                drv_row["fraud_ring_id"].iloc[0]
+            )
+
+    risk_score = min(1.0, fraud_rate * 10 + cancel_rate * 2)
+    risk_level = (
+        "CRITICAL" if risk_score > 0.7 else
+        "HIGH"     if risk_score > 0.4 else
+        "MEDIUM"   if risk_score > 0.2 else
+        "LOW"
+    )
+
+    recommendation = (
+        "Immediate suspension recommended."
+        if risk_level == "CRITICAL" else
+        "Flag for manual review."
+        if risk_level == "HIGH" else
+        "Monitor closely."
+        if risk_level == "MEDIUM" else
+        "No action required."
+    )
+
+    return DriverRiskResponse(
+        driver_id         = driver_id,
+        risk_score        = round(risk_score, 4),
+        risk_level        = risk_level,
+        recent_fraud_rate = round(fraud_rate, 4),
+        cancel_velocity   = round(cancel_rate, 4),
+        ring_member       = ring_member,
+        recommendation    = recommendation,
+    )
+
+
+@router.get("/demand/forecast/{zone_id}")
+async def demand_forecast(zone_id: str):
+    """
+    Next 24-hour demand forecast for a zone.
+    Uses Prophet ML model if available, falls back to rule-based.
+    """
+    from generator.cities import ZONES, get_zone_demand_pattern
+    from model.demand import forecast_zone
+    import datetime as dt
+
+    zone = ZONES.get(zone_id)
+    if zone is None:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Zone {zone_id} not found",
+        )
+
+    demand_models = app_state.get("demand_models", {})
+
+    # ML path — Prophet model available for this zone
+    if zone_id in demand_models:
+        forecast_df = forecast_zone(
+            demand_models[zone_id], zone_id, hours_ahead=24,
+        )
+        forecast = []
+        for _, row in forecast_df.iterrows():
+            forecast.append({
+                "hour":              int(row["hour"]),
+                "hour_label":        row["hour_label"],
+                "demand_multiplier": float(row["demand_multiplier"]),
+                "expected_trips":    max(0, round(float(row["yhat"]))),
+                "surge_expected":    bool(row["surge_expected"]),
+                "yhat_lower":        float(row["yhat_lower"]),
+                "yhat_upper":        float(row["yhat_upper"]),
+                "confidence_pct":    float(row["confidence_pct"]),
+            })
+
+        return {
+            "zone_id":      zone_id,
+            "zone_name":    zone.name,
+            "city":         zone.city,
+            "forecast":     forecast,
+            "model":        "prophet_ml",
+            "generated_at": dt.datetime.now().isoformat(),
+        }
+
+    # Fallback — rule-based demand pattern
+    now = dt.datetime.now()
+    forecast = []
+    for h in range(24):
+        hour   = (now.hour + h) % 24
+        dow    = now.weekday()
+        demand = get_zone_demand_pattern(zone, hour, dow)
+        forecast.append({
+            "hour":              hour,
+            "hour_label":        f"{hour:02d}:00",
+            "demand_multiplier": round(demand, 3),
+            "expected_trips":    int(demand * 45),
+            "surge_expected":    demand > 1.8,
+        })
+
+    return {
+        "zone_id":      zone_id,
+        "zone_name":    zone.name,
+        "city":         zone.city,
+        "forecast":     forecast,
+        "model":        "rule_based",
+        "generated_at": now.isoformat(),
+    }
+
+
+@router.get(
+    "/kpi/summary",
+    response_model=KPISummaryResponse,
+)
+async def kpi_summary():
+    """
+    Pilot KPI dashboard numbers.
+    The core metrics shown on the demo dashboard.
+    """
+    report = app_state.get("report", {})
+
+    if not report:
+        raise HTTPException(
+            status_code=503,
+            detail="Evaluation report not loaded. Run train.py.",
+        )
+
+    xgb      = report.get("xgboost", {})
+    two_stage = report.get("two_stage", {})
+    base     = report.get("baseline", {})
+    annual   = report.get("annual_extrapolation", {})
+
+    total_trips = int(
+        xgb.get("total_trips", two_stage.get("total_trips", 0))
+    )
+    fraud_caught = int(
+        xgb.get("fraud_caught", two_stage.get("action_tier_caught", 0))
+    )
+    net_per_trip = float(
+        xgb.get(
+            "net_recoverable_per_trip",
+            two_stage.get("net_recoverable_per_trip", 0),
+        )
+    )
+    net_rec = float(
+        xgb.get(
+            "net_recoverable_inr",
+            two_stage.get("net_recoverable_inr", 0),
+        )
+    )
+    if total_trips > 0 and net_per_trip > 0:
+        reconciled = round(net_per_trip * total_trips, 2)
+        if net_rec <= 0 or abs((net_rec / total_trips) - net_per_trip) >= 0.01:
+            net_rec = reconciled
+
+    annual_rec_crore = annual.get("net_recoverable_crore", 0)
+    royalty_crore    = annual.get("royalty_at_4pct_crore", 0)
+
+    return KPISummaryResponse(
+        window_label     = "live_eval (14-day pilot simulation)",
+        total_trips      = total_trips,
+        fraud_detected   = fraud_caught,
+        fraud_rate_pct   = round(
+            xgb.get("total_fraud", 0)
+            / max(total_trips, 1) * 100, 2,
+        ),
+        baseline_caught  = base.get("fraud_caught", 0),
+        xgboost_caught   = fraud_caught,
+        improvement_pct  = report.get("improvement_pct", 0),
+        net_recoverable_inr = net_rec,
+        net_recoverable_per_trip = net_per_trip,
+        fpr_pct          = round(xgb.get("fpr", 0) * 100, 2),
+        annual_recovery_crore = annual_rec_crore,
+        royalty_crore    = royalty_crore,
+        pilot_criteria_pass = xgb.get("pilot_pass", {}),
+    )
+
+
+@router.get("/kpi/report")
+async def kpi_report():
+    """Full evaluation report as JSON."""
+    return app_state.get("report", {})
+
+
+@router.post(
+    "/fraud/score",
+    response_model=TripScoreResponse,
+)
+async def score_trip(request: TripScoreRequest):
+    """
+    Real-time fraud scoring for a single trip.
+    Returns fraud probability, prediction, and top signals.
+    """
+    model     = app_state.get("model")
+    threshold = app_state.get("threshold", 0.45)
+
+    if model is None:
+        raise HTTPException(
+            status_code=503,
+            detail="Model not loaded. Run python train.py first.",
+        )
+
+    import logging
+    logger = logging.getLogger(__name__)
+
+    trip_dict     = request.model_dump()
+    feature_names = app_state.get("feature_names", [])
+    two_stage     = app_state.get("two_stage_config", {})
+    
+    fraud_prob   = None
+    feature_vals = {}
+    is_fraud     = False
+
+    # Try stateless scoring first (production path)
+    try:
+        from ml.stateless_scorer import score_trip_stateless, build_feature_vector
+        from ml.feature_store import get_driver_features, get_zone_features
+        from model.scoring import get_tier
+        
+        if model and feature_names:
+            result = await score_trip_stateless(
+                trip_dict, model,
+                feature_names, two_stage
+            )
+            fraud_prob    = result["fraud_probability"]
+            tier          = get_tier(fraud_prob)
+            auto_escalate = tier.auto_escalate
+            is_fraud      = fraud_prob >= threshold
+            
+            # Reconstruction for signal building
+            drv_feats     = await get_driver_features(trip_dict.get("driver_id", ""))
+            zone_feats    = await get_zone_features(trip_dict.get("pickup_zone_id", ""))
+            X_vec         = build_feature_vector(trip_dict, drv_feats, zone_feats, feature_names)
+            feature_vals  = dict(zip(feature_names, X_vec))
+            
+    except Exception as e:
+        logger.warning(
+            f"Stateless scorer failed, "
+            f"falling back to pandas: {e}"
+        )
+
+    if fraud_prob is None:
+        # Build a single-row DataFrame matching trip schema
+        trips_df  = pd.DataFrame([trip_dict])
+        trips_df["is_fraud"] = False  # placeholder for feature builder
+
+        # Add fields that feature engineering expects
+        if "is_cancelled" not in trips_df:
+            trips_df["is_cancelled"] = 0
+        if "customer_complaint_flag" not in trips_df:
+            trips_df["customer_complaint_flag"] = False
+        if "data_split" not in trips_df:
+            trips_df["data_split"] = "historical"
+
+        # Build features
+        from model.features import (
+            compute_trip_features,
+            compute_behavioural_sequence_features,
+            FEATURE_COLUMNS,
+            compute_driver_features,
+        )
+
+        # Load drivers for profile features
+        drivers_df = app_state.get("drivers_df", pd.DataFrame())
+
+        trips_df = compute_trip_features(trips_df)
+        trips_df = compute_driver_features(trips_df, drivers_df)
+        trips_df = compute_behavioural_sequence_features(trips_df)
+
+        for col in FEATURE_COLUMNS:
+            if col not in trips_df.columns:
+                trips_df[col] = 0.0
+
+        X = trips_df[FEATURE_COLUMNS].fillna(0.0).astype(float)
+
+        # Score
+        fraud_prob = float(model.predict_proba(X)[0, 1])
+        is_fraud   = fraud_prob >= threshold
+
+        # Two-stage tier assignment
+        from model.scoring import get_tier
+        tier = get_tier(fraud_prob)
+        auto_escalate = tier.auto_escalate
+        feature_vals = X.iloc[0]
+
+    risk_level = (
+        "CRITICAL" if fraud_prob > 0.85 else
+        "HIGH"     if fraud_prob > 0.65 else
+        "MEDIUM"   if fraud_prob > threshold else
+        "LOW"
+    )
+
+    confidence_label = (
+        "high"   if fraud_prob > 0.80 or fraud_prob < 0.20 else
+        "medium" if fraud_prob > 0.60 or fraud_prob < 0.40 else
+        "low"
+    )
+
+    # Top signals (features with high values for this trip)
+    signal_map = {
+        "payment_is_cash":                  "Cash payment detected",
+        "fare_to_expected_ratio":           f"Fare inflated {feature_vals.get('fare_to_expected_ratio', 1):.2f}x",
+        "driver_cancellation_velocity_1hr": f"{feature_vals.get('driver_cancellation_velocity_1hr', 0):.0f} cancellations this hour",
+        "distance_vs_haversine_ratio":      f"Distance inflated {feature_vals.get('distance_vs_haversine_ratio', 1):.2f}x",
+        "is_night":                         "Night trip (higher risk window)",
+        "zone_fraud_rate_rolling_7d":       f"High-risk zone ({feature_vals.get('zone_fraud_rate_rolling_7d', 0)*100:.1f}% fraud rate)",
+    }
+
+    top_signals = []
+    if feature_vals.get("payment_is_cash", 0) == 1:
+        top_signals.append(signal_map["payment_is_cash"])
+    if feature_vals.get("fare_to_expected_ratio", 1) > 1.3:
+        top_signals.append(signal_map["fare_to_expected_ratio"])
+    if feature_vals.get("driver_cancellation_velocity_1hr", 0) >= 2:
+        top_signals.append(signal_map["driver_cancellation_velocity_1hr"])
+    if feature_vals.get("distance_vs_haversine_ratio", 1) > 1.5:
+        top_signals.append(signal_map["distance_vs_haversine_ratio"])
+    if feature_vals.get("is_night", 0) == 1 and is_fraud:
+        top_signals.append(signal_map["is_night"])
+    if feature_vals.get("zone_fraud_rate_rolling_7d", 0) > 0.06:
+        top_signals.append(signal_map["zone_fraud_rate_rolling_7d"])
+
+    if not top_signals:
+        top_signals = [
+            f"Fraud probability: {fraud_prob*100:.1f}%",
+        ]
+
+    # Persist to database if action or watchlist
+    if tier.name in ("action", "watchlist"):
+        try:
+            from security.encryption import encrypt_pii
+            trip_id_stored   = encrypt_pii(str(request.trip_id))
+            driver_id_stored = encrypt_pii(str(request.driver_id))
+            async with AsyncSessionLocal() as db:
+                case = FraudCase(
+                    trip_id=trip_id_stored,
+                    driver_id=driver_id_stored,
+                    zone_id=request.pickup_zone_id,
+                    tier=tier.name,
+                    fraud_probability=round(fraud_prob, 4),
+                    top_signals=top_signals,
+                    fare_inr=request.fare_inr,
+                    recoverable_inr=round(request.fare_inr * 0.15, 2),
+                    auto_escalated=auto_escalate,
+                )
+                db.add(case)
+                await db.commit()
+        except Exception:
+            pass
+
+    # Emit Prometheus counter
+    try:
+        from monitoring.metrics import TRIPS_SCORED
+        TRIPS_SCORED.labels(tier=tier.name, path="stateless").inc()
+    except Exception:
+        pass
+
+    # Fire enforcement webhook for action tier (non-blocking)
+    if tier.name == "action":
+        import asyncio
+        from enforcement.dispatch import auto_enforce
+        asyncio.create_task(
+            auto_enforce(
+                driver_id         = request.driver_id,
+                trip_id           = request.trip_id,
+                fraud_probability = fraud_prob,
+                tier              = tier.name,
+                top_signals       = top_signals,
+            )
+        )
+
+    return TripScoreResponse(
+        trip_id            = request.trip_id,
+        fraud_probability  = round(fraud_prob, 4),
+        tier               = tier.name,
+        tier_label         = tier.label,
+        tier_color         = tier.color,
+        is_fraud_predicted = is_fraud,
+        fraud_risk_level   = risk_level,
+        action_required    = tier.action,
+        auto_escalate      = auto_escalate,
+        top_signals        = top_signals[:3],
+        confidence         = confidence_label,
+        scored_at          = datetime.now().isoformat(),
+    )
+
+
+@router.get("/fraud/tier-summary")
+async def fraud_tier_summary():
+    """
+    Two-stage scoring tier summary.
+    Returns per-tier metrics and combined system performance.
+    """
+    config = app_state.get("two_stage_config")
+    report = app_state.get("report", {})
+    two_stage = report.get("two_stage", {})
+
+    if not config and not two_stage:
+        raise HTTPException(
+            status_code=503,
+            detail="Two-stage config not loaded. "
+                   "Run python model/scoring.py first.",
+        )
+
+    from model.scoring import TIERS
+
+    tiers = []
+    for tier_name, tier in TIERS.items():
+        tiers.append({
+            "name":           tier.name,
+            "label":          tier.label,
+            "threshold_low":  tier.threshold_low,
+            "threshold_high": tier.threshold_high,
+            "color":          tier.color,
+            "action":         tier.action,
+            "auto_escalate":  tier.auto_escalate,
+        })
+
+    evaluation = config.get("evaluation", {}) if config else {}
+    pilot_pass = config.get("pilot_pass", {}) if config else {}
+
+    return {
+        "tiers":          tiers,
+        "evaluation":     evaluation,
+        "pilot_pass":     pilot_pass,
+        "two_stage":      two_stage,
+        "generated_at":   datetime.now().isoformat(),
+    }
