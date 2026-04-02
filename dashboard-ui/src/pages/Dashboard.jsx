@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { apiGet } from '../utils/api';
+import { apiGet, apiGetRaw } from '../utils/api';
 import Clock from '../components/Clock';
 import KPIPanel from '../components/KPIPanel';
 import TierSummaryBar from '../components/TierSummaryBar';
@@ -50,10 +50,7 @@ export default function Dashboard() {
 
   const doHealthCheck = async () => {
     try {
-      // Direct fetch bypasses interceptor to properly catch offline
-      const h = await fetch(`${import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000'}/health`, {
-        signal: AbortSignal.timeout(3000)
-      });
+      const h = await apiGetRaw('/health');
       if (h.ok) {
         const hd = await h.json();
         setApiOk(hd.model_loaded);

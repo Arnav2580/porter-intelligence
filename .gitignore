@@ -31,3 +31,6 @@ _archive/data/raw/trips_full.csv
 .claude
 .claude/
 _archive/
+
+# Local Netlify folder
+.netlify

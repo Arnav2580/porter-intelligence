@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { apiPost } from '../utils/api';
+import { apiFormPost } from '../utils/api';
 import { useAuth } from '../hooks/useAuth';
 import { useNavigate } from 'react-router-dom';
 
@@ -20,17 +20,7 @@ export default function Login() {
       const form = new URLSearchParams();
       form.append('username', username);
       form.append('password', password);
-      // We do a direct fetch since our generic api abstraction assumes JSON content-type
-      const res = await fetch(`${import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000'}/auth/token`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-        body: form,
-      });
-      if (!res.ok) {
-        const body = await res.json().catch(() => ({}));
-        throw new Error(body.detail || 'Invalid credentials');
-      }
-      const data = await res.json();
+      const data = await apiFormPost('/auth/token', form);
       login(data.access_token, data.role || 'ops_analyst', data.name || username);
       navigate('/analyst');
     } catch (err) {

@@ -35,6 +35,26 @@ export async function apiPost(path, body) {
   return res.json()
 }
 
+export async function apiFormPost(path, formData) {
+  const res = await fetch(`${BASE_URL}${path}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: formData,
+  })
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}))
+    throw new Error(body.detail || `API error: ${res.status}`)
+  }
+  return res.json()
+}
+
+export async function apiGetRaw(path) {
+  const res = await fetch(`${BASE_URL}${path}`, {
+    signal: AbortSignal.timeout(3000)
+  })
+  return res
+}
+
 export async function apiPatch(path, body) {
   const res = await fetch(`${BASE_URL}${path}`, {
     method: 'PATCH',
