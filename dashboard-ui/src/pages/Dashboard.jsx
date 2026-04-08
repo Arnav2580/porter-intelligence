@@ -1,7 +1,8 @@
-import React, { useState, useEffect } from 'react';
-import { apiGet, apiGetRaw } from '../utils/api';
+import { useState, useEffect } from 'react';
+import { apiGetRaw } from '../utils/api';
 import Clock from '../components/Clock';
 import KPIPanel from '../components/KPIPanel';
+import ROICalculator from '../components/ROICalculator';
 import TierSummaryBar from '../components/TierSummaryBar';
 import ReallocationPanel from '../components/ReallocationPanel';
 import QueryPanel from '../components/QueryPanel';
@@ -44,19 +45,18 @@ function OfflineScreen({ onRetry }) {
 }
 
 export default function Dashboard() {
-  const [kpi, setKpi]               = useState(null);
   const [apiOk, setApiOk]           = useState(null);
   const [apiStatus, setApiStatus]   = useState('checking');
+  const [healthMeta, setHealthMeta] = useState(null);
 
   const doHealthCheck = async () => {
     try {
       const h = await apiGetRaw('/health');
       if (h.ok) {
         const hd = await h.json();
+        setHealthMeta(hd);
         setApiOk(hd.model_loaded);
         setApiStatus('online');
-        const kd = await apiGet('/kpi/summary');
-        setKpi(kd);
       } else {
         setApiStatus('offline');
       }
@@ -67,11 +67,7 @@ export default function Dashboard() {
 
   useEffect(() => {
     doHealthCheck();
-    const t = setInterval(() => {
-      apiGet('/kpi/summary')
-        .then(d => { setKpi(d); setApiStatus('online'); })
-        .catch(() => setApiStatus('offline'));
-    }, 30000);
+    const t = setInterval(doHealthCheck, 30000);
     return () => clearInterval(t);
   }, []);
 
@@ -87,6 +83,19 @@ export default function Dashboard() {
     return <OfflineScreen onRetry={() => { setApiStatus('checking'); doHealthCheck(); }} />;
   }
 
+  const syntheticFeedEnabled = Boolean(
+    healthMeta?.synthetic_feed_enabled
+  );
+  const runtimeMode = healthMeta?.runtime_mode ?? 'unknown';
+  const modeLabel = syntheticFeedEnabled
+    ? 'DEMO MODE'
+    : runtimeMode === 'prod'
+      ? 'PRODUCTION MODE'
+      : 'SHADOW MODE';
+  const modeColor = syntheticFeedEnabled
+    ? 'var(--warning)'
+    : 'var(--success)';
+
   return (
     <>
       <header className="header">
@@ -94,7 +103,7 @@ export default function Dashboard() {
           <div className="header-logo-mark">P</div>
           <div>
             <div className="header-title">Porter Intelligence Dashboard</div>
-            <div className="header-subtitle">AI Fraud Detection Platform &middot; Bangalore Operations</div>
+            <div className="header-subtitle">Leakage Control Platform &middot; Real-Time City Operations</div>
           </div>
         </div>
         <div className="header-right">
@@ -102,7 +111,18 @@ export default function Dashboard() {
           {apiOk !== null && (
             <div className="live-badge" style={{ color: apiOk ? 'var(--success)' : 'var(--danger)' }}>
               <div className="live-dot" style={{ background: apiOk ? 'var(--success)' : 'var(--danger)', animation: apiOk ? 'pulse-dot 2s infinite' : 'none' }} />
-              {apiOk ? 'MODEL LIVE' : 'MODEL OFFLINE'}
+              {apiOk ? 'MODEL READY' : 'MODEL NOT READY'}
+            </div>
+          )}
+          {healthMeta && (
+            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 4 }}>
+              <div className="live-badge" style={{ color: modeColor }}>
+                <div className="live-dot" style={{ background: modeColor, animation: syntheticFeedEnabled ? 'pulse-dot 2s infinite' : 'none' }} />
+                {modeLabel}
+              </div>
+              <div style={{ fontSize: 10, color: 'var(--muted)', maxWidth: 240, textAlign: 'right', lineHeight: 1.4 }}>
+                {healthMeta.data_provenance}
+              </div>
             </div>
           )}
           <Clock />
@@ -111,7 +131,8 @@ export default function Dashboard() {
 
       <main className="main">
         <div className="col">
-          {kpi ? <KPIPanel kpi={kpi} /> : <div className="loading"><div className="spinner" /> Loading KPIs...</div>}
+          <KPIPanel runtimeMeta={healthMeta} />
+          <ROICalculator />
           <TierSummaryBar />
           <ReallocationPanel />
           <QueryPanel />

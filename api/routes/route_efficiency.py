@@ -1,10 +1,56 @@
 """Route efficiency API routes."""
 
+import asyncio
 from fastapi import APIRouter, HTTPException
 from typing import Optional
-from datetime import datetime
+from datetime import datetime, timezone
 
-router = APIRouter()
+router = APIRouter(tags=["route_efficiency"])
+_EFFICIENCY_CACHE_TTL_SECONDS = 3600
+
+
+def _build_efficiency_snapshot(trips_df):
+    from model.route_efficiency import (
+        compute_dead_mile_rate,
+        compute_hourly_utilisation,
+        generate_reallocation_suggestions,
+    )
+
+    dead_mile = compute_dead_mile_rate(trips_df)
+    utilisation = compute_hourly_utilisation(trips_df)
+    suggestions = generate_reallocation_suggestions(
+        trips_df,
+        dead_mile,
+        utilisation,
+    )
+    return {
+        "dead_mile": dead_mile,
+        "utilisation": utilisation,
+        "suggestions": suggestions,
+    }
+
+
+async def _get_efficiency_snapshot(trips_df):
+    from database.redis_client import cache_get, cache_set
+
+    cache_key = (
+        "route-efficiency:snapshot:"
+        f"{datetime.now(timezone.utc).strftime('%Y%m%d%H')}"
+    )
+    cached = await cache_get(cache_key)
+    if isinstance(cached, dict) and cached:
+        return cached
+
+    snapshot = await asyncio.to_thread(
+        _build_efficiency_snapshot,
+        trips_df,
+    )
+    await cache_set(
+        cache_key,
+        snapshot,
+        ttl_seconds=_EFFICIENCY_CACHE_TTL_SECONDS,
+    )
+    return snapshot
 
 
 @router.get("/efficiency/summary")
@@ -15,9 +61,6 @@ async def efficiency_summary():
     """
     from api.state import app_state
     from model.route_efficiency import (
-        compute_dead_mile_rate,
-        compute_hourly_utilisation,
-        generate_reallocation_suggestions,
         compute_fleet_summary,
     )
 
@@ -28,20 +71,7 @@ async def efficiency_summary():
             detail="Trip data not loaded"
         )
 
-    # Use cached efficiency data if available
-    if "efficiency_cache" not in app_state:
-        dead_mile   = compute_dead_mile_rate(trips_df)
-        utilisation = compute_hourly_utilisation(trips_df)
-        suggestions = generate_reallocation_suggestions(
-            trips_df, dead_mile, utilisation
-        )
-        app_state["efficiency_cache"] = {
-            "dead_mile":   dead_mile,
-            "utilisation": utilisation,
-            "suggestions": suggestions,
-        }
-
-    cache = app_state["efficiency_cache"]
+    cache = await _get_efficiency_snapshot(trips_df)
     summary = compute_fleet_summary(
         trips_df,
         cache["dead_mile"],
@@ -61,11 +91,6 @@ async def reallocation_suggestions(limit: int = 8):
     data are reused from startup cache.
     """
     from api.state import app_state
-    from model.route_efficiency import (
-        compute_dead_mile_rate,
-        compute_hourly_utilisation,
-        generate_reallocation_suggestions,
-    )
 
     trips_df = app_state.get("trips_df")
     if trips_df is None or trips_df.empty:
@@ -74,34 +99,8 @@ async def reallocation_suggestions(limit: int = 8):
             detail="Trip data not loaded"
         )
 
-    if "efficiency_cache" not in app_state:
-        dead_mile   = compute_dead_mile_rate(trips_df)
-        utilisation = compute_hourly_utilisation(trips_df)
-        suggestions = generate_reallocation_suggestions(
-            trips_df, dead_mile, utilisation
-        )
-        app_state["efficiency_cache"] = {
-            "dead_mile":   dead_mile,
-            "utilisation": utilisation,
-            "suggestions": suggestions,
-        }
-        app_state["efficiency_cache_hour"] = datetime.now().hour
-
-    # Hourly cache invalidation for suggestions only
-    cache = app_state["efficiency_cache"]
-    cache_hour = app_state.get("efficiency_cache_hour", -1)
-    current_hour = datetime.now().hour
-
-    if current_hour != cache_hour:
-        suggestions = generate_reallocation_suggestions(
-            trips_df,
-            cache.get("dead_mile", {}),
-            cache.get("utilisation", {}),
-        )
-        app_state["efficiency_cache"]["suggestions"] = suggestions
-        app_state["efficiency_cache_hour"] = current_hour
-
-    suggestions = app_state["efficiency_cache"]["suggestions"]
+    cache = await _get_efficiency_snapshot(trips_df)
+    suggestions = cache["suggestions"]
 
     return {
         "suggestions":  suggestions[:limit],
@@ -117,7 +116,6 @@ async def dead_mile_heatmap():
     Used by the dashboard map toggle.
     """
     from api.state import app_state
-    from model.route_efficiency import compute_dead_mile_rate
     from generator.cities import ZONES
 
     trips_df = app_state.get("trips_df")
@@ -127,13 +125,8 @@ async def dead_mile_heatmap():
             detail="Trip data not loaded"
         )
 
-    if "efficiency_cache" not in app_state:
-        dead_mile = compute_dead_mile_rate(trips_df)
-        app_state["efficiency_cache"] = {
-            "dead_mile": dead_mile
-        }
-
-    dead_mile = app_state["efficiency_cache"]["dead_mile"]
+    cache = await _get_efficiency_snapshot(trips_df)
+    dead_mile = cache["dead_mile"]
 
     zones = []
     for zone_id, data in dead_mile.items():
@@ -169,7 +162,6 @@ async def zone_utilisation(zone_id: str):
     Shows active vs idle by vehicle type per hour.
     """
     from api.state import app_state
-    from model.route_efficiency import compute_hourly_utilisation
     from generator.cities import ZONES
 
     zone = ZONES.get(zone_id)
@@ -186,15 +178,8 @@ async def zone_utilisation(zone_id: str):
             detail="Trip data not loaded"
         )
 
-    if "efficiency_cache" not in app_state:
-        utilisation = compute_hourly_utilisation(trips_df)
-        app_state["efficiency_cache"] = {
-            "utilisation": utilisation
-        }
-
-    util = app_state["efficiency_cache"].get(
-        "utilisation", {}
-    )
+    cache = await _get_efficiency_snapshot(trips_df)
+    util = cache.get("utilisation", {})
     zone_util = util.get(zone_id, {})
 
     # Format for API response

@@ -14,14 +14,14 @@ RANDOM_SEED: int = 42
 np.random.seed(RANDOM_SEED)
 
 # ── Scale constants ────────────────────────────────────────────
-# Demo scale — represents real Porter operations
+# Reference scale — sized to represent real Porter operations
 NUM_DRIVERS:    int = 50_000    # represents 3 lakh real drivers
 NUM_CUSTOMERS:  int = 100_000   # represents 20 lakh SME customers
 NUM_TRIPS:      int = 500_000   # full generation run
 
-# Pilot-specific windows (critical for two-stage validation)
+# Evaluation windows used for model training and scored validation
 HISTORICAL_DAYS: int = 45       # model trains on this window
-LIVE_EVAL_DAYS:  int = 14       # simulates the 14-day live pilot
+LIVE_EVAL_DAYS:  int = 14       # simulated live evaluation window
 
 # ── Cities ────────────────────────────────────────────────────
 CITIES: List[str] = [
@@ -29,7 +29,7 @@ CITIES: List[str] = [
     "hyderabad", "chennai", "pune", "kolkata"
 ]
 
-PRIMARY_CITY: str = "bangalore"  # demo focus city
+PRIMARY_CITY: str = "bangalore"  # primary walkthrough city
 
 # ── Vehicle types with Porter's exact pricing ─────────────────
 # Source: Porter website public pricing as of 2024
@@ -139,8 +139,8 @@ FRAUD_PROPENSITY_ADJUSTMENTS: Dict[str, float] = {
     "high_cancellation":   +0.20,   # cancellation_rate > 0.20
 }
 
-# ── Pilot success KPI thresholds ──────────────────────────────
-# These are the exact metrics you will be judged on in the pilot
+# ── Performance criteria ──────────────────────────────────────
+# These thresholds anchor the scored validation benchmark.
 PILOT_SUCCESS_CRITERIA: Dict[str, float] = {
     "min_detection_improvement_pct": 25.0,   # beat baseline by 25%
     "max_false_positive_rate":        0.08,  # 8% ceiling
@@ -149,7 +149,7 @@ PILOT_SUCCESS_CRITERIA: Dict[str, float] = {
 
 # Cost assumptions for KPI calculation
 FALSE_POSITIVE_OPS_COST: float = 200.0   # ₹ cost per false flag raised
-ANNUAL_EXTRAP_FACTOR: float = 365 / 14   # 14-day pilot → annual
+ANNUAL_EXTRAP_FACTOR: float = 365 / 14   # evaluation window -> annualised view
 CONFIDENCE_HAIRCUT: float = 0.70         # conservative adj for real data
 
 # ── Time patterns ─────────────────────────────────────────────
@@ -178,8 +178,8 @@ WEEKEND_HOUR_WEIGHTS = [w / _wend_sum for w in WEEKEND_HOUR_WEIGHTS]
 API_TITLE: str = "Porter Intelligence Platform"
 API_VERSION: str = "1.0.0"
 API_DESCRIPTION: str = (
-    "AI-powered driver fraud detection and demand forecasting "
-    "for Porter's operations team."
+    "ML-powered leakage control, fraud detection, and operational "
+    "decision support for logistics operations."
 )
 
 # ── Paths ─────────────────────────────────────────────────────

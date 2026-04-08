@@ -1,5 +1,9 @@
-const BASE_URL = import.meta.env.VITE_API_BASE_URL
-                 || 'http://localhost:8000'
+const envBaseUrl = (import.meta.env.VITE_API_BASE_URL || '').trim()
+const browserHost = typeof window !== 'undefined'
+  ? window.location.hostname
+  : 'localhost'
+const isLocalBrowser = ['localhost', '127.0.0.1'].includes(browserHost)
+const BASE_URL = envBaseUrl || (isLocalBrowser ? 'http://localhost:8000' : '')
 
 const getToken = () =>
   sessionStorage.getItem('porter_token')

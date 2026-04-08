@@ -16,6 +16,8 @@ import httpx
 from typing import Dict, Optional, List
 from datetime import datetime
 
+from database.case_store import should_enforce_actions
+
 logger = logging.getLogger(__name__)
 
 PORTER_DISPATCH_URL = os.getenv("PORTER_DISPATCH_URL", "")
@@ -148,6 +150,13 @@ async def auto_enforce(
     Determines action severity from probability.
     """
     if tier != "action":
+        return None
+
+    if not should_enforce_actions():
+        logger.info(
+            "Shadow mode enabled — skipping enforcement for trip=%s",
+            trip_id,
+        )
         return None
 
     if fraud_probability < ACTION_THRESHOLD:

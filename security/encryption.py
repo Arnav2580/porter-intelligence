@@ -1,16 +1,4 @@
-"""
-AES-256-GCM PII encryption — Phase D.
-
-Encrypts sensitive identifiers (driver_id, trip_id) before persisting
-to the database. Uses the ENCRYPTION_KEY environment variable (32 raw
-bytes encoded as URL-safe base64).
-
-Generate a key:
-    python -c "import secrets, base64; print(base64.urlsafe_b64encode(secrets.token_bytes(32)).decode())"
-
-If ENCRYPTION_KEY is not set the module operates in dev-mode plaintext
-with a logged warning — no data loss, encryption silently disabled.
-"""
+"""AES-256-GCM PII encryption."""
 
 import base64
 import logging
@@ -18,22 +6,51 @@ import os
 import secrets
 from typing import Optional
 
+from security.settings import (
+    SecurityConfigurationError,
+    allow_plaintext_pii,
+    is_placeholder_value,
+)
+
 logger = logging.getLogger(__name__)
 
 _KEY: Optional[bytes] = None
 _ENABLED: bool = False
 _LOADED: bool = False
+_LOAD_ERROR: Optional[str] = None
+
+
+class EncryptionConfigurationError(SecurityConfigurationError):
+    """Raised when PII encryption cannot be safely enabled."""
+
+
+def reset_encryption_state() -> None:
+    """Reset module-level encryption state. Used by tests."""
+    global _KEY, _ENABLED, _LOADED, _LOAD_ERROR
+    _KEY = None
+    _ENABLED = False
+    _LOADED = False
+    _LOAD_ERROR = None
 
 
 def _load_key() -> None:
-    global _KEY, _ENABLED, _LOADED
+    global _KEY, _ENABLED, _LOADED, _LOAD_ERROR
+    _KEY = None
+    _ENABLED = False
+    _LOAD_ERROR = None
     _LOADED = True
     raw = os.getenv("ENCRYPTION_KEY", "").strip()
-    if not raw:
-        logger.warning(
-            "ENCRYPTION_KEY not set — PII stored in plaintext (dev mode). "
-            "Set ENCRYPTION_KEY in production."
+    if is_placeholder_value(raw):
+        if allow_plaintext_pii():
+            logger.warning(
+                "ENCRYPTION_KEY not configured — plaintext PII is enabled "
+                "only because demo mode explicitly opted into it."
+            )
+            return
+        _LOAD_ERROR = (
+            "ENCRYPTION_KEY must be configured before PII can be persisted."
         )
+        logger.error(_LOAD_ERROR)
         return
     try:
         key = base64.urlsafe_b64decode(raw + "==")   # pad-tolerant
@@ -45,27 +62,37 @@ def _load_key() -> None:
         _ENABLED = True
         logger.info("AES-256-GCM PII encryption enabled")
     except Exception as e:
-        logger.error(
-            f"Invalid ENCRYPTION_KEY ({e}) — "
-            f"falling back to plaintext"
-        )
+        if allow_plaintext_pii():
+            logger.warning(
+                "Invalid ENCRYPTION_KEY (%s) — demo mode is falling back to "
+                "plaintext PII because ALLOW_PLAINTEXT_PII is enabled.",
+                e,
+            )
+            return
+        _LOAD_ERROR = f"Invalid ENCRYPTION_KEY: {e}"
+        logger.error(_LOAD_ERROR)
 
 
 def _ensure_loaded() -> None:
     if not _LOADED:
         _load_key()
+    if _LOAD_ERROR:
+        raise EncryptionConfigurationError(_LOAD_ERROR)
 
 
 def is_encryption_enabled() -> bool:
-    _ensure_loaded()
+    try:
+        _ensure_loaded()
+    except EncryptionConfigurationError:
+        return False
     return _ENABLED
 
 
 def encrypt_pii(value: str) -> str:
     """
     Encrypt a PII string using AES-256-GCM.
-    Returns URL-safe base64-encoded  nonce (12 B) + ciphertext + tag (16 B).
-    If encryption is disabled returns the value unchanged.
+    Returns URL-safe base64-encoded nonce + ciphertext + tag.
+    Raises if encryption is required but not configured safely.
     """
     _ensure_loaded()
     if not _ENABLED or _KEY is None:
@@ -83,9 +110,14 @@ def decrypt_pii(value: str) -> str:
     """
     Decrypt a value previously encrypted by encrypt_pii.
     Returns original plaintext, or the value as-is if decryption fails
-    (handles plaintext stored in dev mode gracefully).
+    while demo mode plaintext fallback is explicitly enabled.
     """
-    _ensure_loaded()
+    try:
+        _ensure_loaded()
+    except EncryptionConfigurationError:
+        if allow_plaintext_pii():
+            return value
+        raise
     if not _ENABLED or _KEY is None:
         return value
 

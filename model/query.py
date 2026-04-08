@@ -233,7 +233,7 @@ def build_structured_answer(
             f"(Rs.{ev.get('net_recoverable_per_trip', 0):.2f}/trip)\n"
             f"- Annual recovery at Porter scale: "
             f"Rs.{ev.get('annual_recovery_crore', 0):.1f} crore\n\n"
-            f"All three pilot criteria: PASSED"
+            f"All benchmark performance criteria: PASSED"
         )
 
     # ── Fraud types query ─────────────────────────────────
@@ -308,9 +308,8 @@ def query_llm(
     """
     context_str = json.dumps(context, indent=2, default=str)
 
-    prompt = f"""You are the AI assistant for Porter Intelligence Platform,
-an AI fraud detection system deployed for Porter — India's largest
-intra-city logistics company.
+    prompt = f"""You are the operations assistant for Porter Intelligence Platform,
+a logistics fraud detection and leakage-control platform.
 
 Here is the current system data:
 {context_str}
@@ -350,7 +349,7 @@ Answer:"""
             "- Fraud rings and organised fraud networks\n"
             "- Driver risk rankings and profiles\n"
             "- Zone fraud analysis and hotspots\n"
-            "- KPI summary and pilot results\n"
+            "- KPI summary and evaluation results\n"
             "- Fraud type breakdown\n"
             "- How the detection model works\n\n"
             "Try one of the example queries above."

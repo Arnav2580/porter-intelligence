@@ -1,47 +1,36 @@
 """Authentication endpoints."""
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.security import OAuth2PasswordRequestForm
 
+from api.limiting import limiter
+from auth.config import get_seed_user
 from auth.dependencies import get_current_user
 from auth.jwt import (
     create_access_token,
-    hash_password,
     verify_password,
 )
-from auth.models import UserRole
+from security.settings import (
+    SecurityConfigurationError,
+    get_rate_limit,
+)
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
-_USERS = {
-    "admin": {
-        "password_hash": hash_password("PorterAdmin2024!"),
-        "role": UserRole.ADMIN,
-        "name": "Platform Administrator",
-    },
-    "ops_manager": {
-        "password_hash": hash_password("OpsManager2024!"),
-        "role": UserRole.OPS_MANAGER,
-        "name": "Operations Manager",
-    },
-    "analyst_1": {
-        "password_hash": hash_password("Analyst2024!"),
-        "role": UserRole.OPS_ANALYST,
-        "name": "Fraud Analyst",
-    },
-    "viewer": {
-        "password_hash": hash_password("Viewer2024!"),
-        "role": UserRole.READ_ONLY,
-        "name": "Dashboard Viewer",
-    },
-}
-
-
 @router.post("/token")
+@limiter.limit(get_rate_limit("AUTH_TOKEN_RATE_LIMIT", "10/minute"))
 async def login(
+    request: Request,
     form: OAuth2PasswordRequestForm = Depends(),
 ):
-    user = _USERS.get(form.username)
+    try:
+        user = get_seed_user(form.username)
+    except SecurityConfigurationError as exc:
+        raise HTTPException(
+            status_code=503,
+            detail=str(exc),
+        ) from exc
+
     if not user or not verify_password(
         form.password,
         user["password_hash"],
@@ -51,13 +40,19 @@ async def login(
             detail="Invalid username or password",
         )
 
-    token = create_access_token(
-        {
-            "sub": form.username,
-            "role": user["role"].value,
-            "name": user["name"],
-        }
-    )
+    try:
+        token = create_access_token(
+            {
+                "sub": form.username,
+                "role": user["role"].value,
+                "name": user["name"],
+            }
+        )
+    except SecurityConfigurationError as exc:
+        raise HTTPException(
+            status_code=503,
+            detail=str(exc),
+        ) from exc
 
     return {
         "access_token": token,

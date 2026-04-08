@@ -40,6 +40,12 @@ class DriverActionType(str, enum.Enum):
     WATCHLIST = "watchlist"
 
 
+class IngestionStagingStatus(str, enum.Enum):
+    PENDING = "pending"
+    QUEUED = "queued"
+    FAILED = "failed"
+
+
 class FraudCase(Base):
     __tablename__ = "fraud_cases"
 
@@ -81,6 +87,49 @@ class FraudCase(Base):
         Index("ix_fraud_cases_driver_created", "driver_id", "created_at"),
         Index("ix_fraud_cases_tier_status", "tier", "status"),
         Index("ix_fraud_cases_zone_created", "zone_id", "created_at"),
+    )
+
+
+class ShadowCase(Base):
+    __tablename__ = "shadow_cases"
+
+    id = Column(
+        UUID(as_uuid=True),
+        primary_key=True,
+        default=uuid.uuid4,
+    )
+    trip_id = Column(String(100), nullable=False, index=True)
+    driver_id = Column(String(100), nullable=False, index=True)
+    zone_id = Column(String(50), index=True)
+    fraud_type = Column(String(50))
+    tier = Column(String(20), nullable=False)
+    fraud_probability = Column(Float, nullable=False)
+    top_signals = Column(JSONB)
+    fare_inr = Column(Float)
+    recoverable_inr = Column(Float)
+    status = Column(
+        SAEnum(FraudCaseStatus),
+        default=FraudCaseStatus.OPEN,
+        nullable=False,
+    )
+    source_channel = Column(String(50), nullable=False, index=True)
+    live_write_suppressed = Column(Boolean, default=True, nullable=False)
+    shadow_reason = Column(String(100), default="read_only_shadow")
+    created_at = Column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        nullable=False,
+    )
+    updated_at = Column(
+        DateTime(timezone=True),
+        onupdate=func.now(),
+    )
+    resolved_at = Column(DateTime(timezone=True))
+
+    __table_args__ = (
+        Index("ix_shadow_cases_driver_created", "driver_id", "created_at"),
+        Index("ix_shadow_cases_tier_status", "tier", "status"),
+        Index("ix_shadow_cases_source_created", "source_channel", "created_at"),
     )
 
 
@@ -136,3 +185,35 @@ class ModelMetrics(Base):
     net_rec_per_trip = Column(Float)
     data_source = Column(String(50))
     notes = Column(Text)
+
+
+class IngestionStagingRecord(Base):
+    __tablename__ = "ingestion_staging"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    source = Column(String(50), nullable=False, index=True)
+    mapping_name = Column(String(100), nullable=False)
+    external_trip_id = Column(String(100), index=True)
+    payload = Column(JSONB, nullable=False)
+    status = Column(
+        SAEnum(IngestionStagingStatus),
+        default=IngestionStagingStatus.PENDING,
+        nullable=False,
+        index=True,
+    )
+    retry_count = Column(Integer, default=0, nullable=False)
+    stream_message_id = Column(String(100))
+    error_message = Column(Text)
+    created_at = Column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        nullable=False,
+        index=True,
+    )
+    queued_at = Column(DateTime(timezone=True))
+    last_error_at = Column(DateTime(timezone=True))
+
+    __table_args__ = (
+        Index("ix_ingestion_staging_status_created", "status", "created_at"),
+        Index("ix_ingestion_staging_source_status", "source", "status"),
+    )

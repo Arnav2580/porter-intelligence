@@ -1,10 +1,12 @@
 """Driver intelligence API routes."""
 
+import asyncio
 import pandas as pd
 from fastapi import APIRouter, HTTPException
 from typing import List, Optional
 
-router = APIRouter()
+router = APIRouter(tags=["intelligence"])
+_TOP_RISK_CACHE_TTL_SECONDS = 3600
 
 
 def _compute_top_risk(
@@ -103,6 +105,36 @@ def _compute_top_risk(
     return results
 
 
+async def _get_top_risk_cache(
+    trips_df: pd.DataFrame,
+    drivers_df: pd.DataFrame,
+) -> list[dict]:
+    from datetime import datetime, timezone
+
+    from database.redis_client import cache_get, cache_set
+
+    cache_key = (
+        "driver-intelligence:top-risk:"
+        f"{datetime.now(timezone.utc).strftime('%Y%m%d%H')}"
+    )
+    cached = await cache_get(cache_key)
+    if isinstance(cached, list) and cached:
+        return cached
+
+    computed = await asyncio.to_thread(
+        _compute_top_risk,
+        trips_df,
+        drivers_df,
+        50,
+    )
+    await cache_set(
+        cache_key,
+        computed,
+        ttl_seconds=_TOP_RISK_CACHE_TTL_SECONDS,
+    )
+    return computed
+
+
 @router.get("/intelligence/driver/{driver_id}")
 async def driver_intelligence_profile(driver_id: str):
     """
@@ -143,7 +175,6 @@ async def top_risk_drivers(
     Optionally filtered by zone or recommended action.
     Uses startup cache with hourly invalidation.
     """
-    from datetime import datetime
     from api.state import app_state
 
     trips_df   = app_state.get("trips_df")
@@ -155,17 +186,7 @@ async def top_risk_drivers(
             detail="Data not loaded"
         )
 
-    # Check cache — invalidate hourly
-    cache_hour = app_state.get("top_risk_cache_hour", -1)
-    current_hour = datetime.now().hour
-    if current_hour != cache_hour or \
-       "top_risk_cache" not in app_state:
-        app_state["top_risk_cache"] = _compute_top_risk(
-            trips_df, drivers_df, limit=50
-        )
-        app_state["top_risk_cache_hour"] = current_hour
-
-    cached = app_state["top_risk_cache"]
+    cached = await _get_top_risk_cache(trips_df, drivers_df)
 
     # Apply filters on cached results
     results = cached

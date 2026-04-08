@@ -9,8 +9,9 @@ import pandas as pd
 from datetime import datetime
 from typing import Dict
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Request
 
+from api.limiting import limiter
 from api.schemas import (
     TripScoreRequest, TripScoreResponse,
     HeatmapResponse, LiveFeedResponse,
@@ -18,10 +19,10 @@ from api.schemas import (
     ZoneFraudRate, FraudFeedItem,
 )
 from api.state import app_state
-from database.connection import AsyncSessionLocal
-from database.models import FraudCase
+from database.case_store import persist_flagged_case, should_enforce_actions
+from security.settings import get_rate_limit
 
-router = APIRouter()
+router = APIRouter(tags=["platform"])
 
 
 @router.get(
@@ -281,8 +282,7 @@ async def demand_forecast(zone_id: str):
 )
 async def kpi_summary():
     """
-    Pilot KPI dashboard numbers.
-    The core metrics shown on the demo dashboard.
+    Evaluation benchmark summary used by management and buyer review.
     """
     report = app_state.get("report", {})
 
@@ -321,10 +321,11 @@ async def kpi_summary():
             net_rec = reconciled
 
     annual_rec_crore = annual.get("net_recoverable_crore", 0)
-    royalty_crore    = annual.get("royalty_at_4pct_crore", 0)
 
     return KPISummaryResponse(
-        window_label     = "live_eval (14-day pilot simulation)",
+        evaluation_window_label = (
+            "synthetic evaluation window (14-day scored benchmark)"
+        ),
         total_trips      = total_trips,
         fraud_detected   = fraud_caught,
         fraud_rate_pct   = round(
@@ -337,23 +338,44 @@ async def kpi_summary():
         net_recoverable_inr = net_rec,
         net_recoverable_per_trip = net_per_trip,
         fpr_pct          = round(xgb.get("fpr", 0) * 100, 2),
-        annual_recovery_crore = annual_rec_crore,
-        royalty_crore    = royalty_crore,
-        pilot_criteria_pass = xgb.get("pilot_pass", {}),
+        projected_annual_recovery_crore = annual_rec_crore,
+        performance_criteria = xgb.get("pilot_pass", {}),
     )
 
 
 @router.get("/kpi/report")
 async def kpi_report():
-    """Full evaluation report as JSON."""
-    return app_state.get("report", {})
+    """Sanitized evaluation report for buyer-safe inspection."""
+    report = app_state.get("report", {})
+    if not report:
+        return {}
+
+    def _sanitize(value):
+        if isinstance(value, dict):
+            sanitized = {}
+            for key, item in value.items():
+                if key == "royalty_at_4pct_crore":
+                    continue
+                mapped_key = {
+                    "annual_extrapolation": "annual_impact_estimate",
+                    "pilot_pass": "performance_criteria",
+                    "pilot_ready": "performance_ready",
+                }.get(key, key)
+                sanitized[mapped_key] = _sanitize(item)
+            return sanitized
+        if isinstance(value, list):
+            return [_sanitize(item) for item in value]
+        return value
+
+    return _sanitize(report)
 
 
 @router.post(
     "/fraud/score",
     response_model=TripScoreResponse,
 )
-async def score_trip(request: TripScoreRequest):
+@limiter.limit(get_rate_limit("FRAUD_SCORE_RATE_LIMIT", "100/minute"))
+async def score_trip(request: Request, body: TripScoreRequest):
     """
     Real-time fraud scoring for a single trip.
     Returns fraud probability, prediction, and top signals.
@@ -364,13 +386,13 @@ async def score_trip(request: TripScoreRequest):
     if model is None:
         raise HTTPException(
             status_code=503,
-            detail="Model not loaded. Run python train.py first.",
+            detail="Model not loaded. Run the training pipeline first.",
         )
 
     import logging
     logger = logging.getLogger(__name__)
 
-    trip_dict     = request.model_dump()
+    trip_dict     = body.model_dump()
     feature_names = app_state.get("feature_names", [])
     two_stage     = app_state.get("two_stage_config", {})
     
@@ -495,25 +517,24 @@ async def score_trip(request: TripScoreRequest):
     # Persist to database if action or watchlist
     if tier.name in ("action", "watchlist"):
         try:
-            from security.encryption import encrypt_pii
-            trip_id_stored   = encrypt_pii(str(request.trip_id))
-            driver_id_stored = encrypt_pii(str(request.driver_id))
-            async with AsyncSessionLocal() as db:
-                case = FraudCase(
-                    trip_id=trip_id_stored,
-                    driver_id=driver_id_stored,
-                    zone_id=request.pickup_zone_id,
-                    tier=tier.name,
-                    fraud_probability=round(fraud_prob, 4),
-                    top_signals=top_signals,
-                    fare_inr=request.fare_inr,
-                    recoverable_inr=round(request.fare_inr * 0.15, 2),
-                    auto_escalated=auto_escalate,
-                )
-                db.add(case)
-                await db.commit()
-        except Exception:
-            pass
+            await persist_flagged_case(
+                trip_id=str(body.trip_id),
+                driver_id=str(body.driver_id),
+                zone_id=body.pickup_zone_id,
+                tier=tier.name,
+                fraud_probability=fraud_prob,
+                top_signals=top_signals,
+                fare_inr=body.fare_inr,
+                recoverable_inr=round(body.fare_inr * 0.15, 2),
+                auto_escalated=auto_escalate,
+                source_channel="api_score",
+            )
+        except Exception as exc:
+            logger.error(
+                "Failed to persist scored fraud case for %s: %s",
+                body.trip_id,
+                exc,
+            )
 
     # Emit Prometheus counter
     try:
@@ -523,13 +544,13 @@ async def score_trip(request: TripScoreRequest):
         pass
 
     # Fire enforcement webhook for action tier (non-blocking)
-    if tier.name == "action":
+    if tier.name == "action" and should_enforce_actions():
         import asyncio
         from enforcement.dispatch import auto_enforce
         asyncio.create_task(
             auto_enforce(
-                driver_id         = request.driver_id,
-                trip_id           = request.trip_id,
+                driver_id         = body.driver_id,
+                trip_id           = body.trip_id,
                 fraud_probability = fraud_prob,
                 tier              = tier.name,
                 top_signals       = top_signals,
@@ -537,7 +558,7 @@ async def score_trip(request: TripScoreRequest):
         )
 
     return TripScoreResponse(
-        trip_id            = request.trip_id,
+        trip_id            = body.trip_id,
         fraud_probability  = round(fraud_prob, 4),
         tier               = tier.name,
         tier_label         = tier.label,
@@ -566,7 +587,7 @@ async def fraud_tier_summary():
         raise HTTPException(
             status_code=503,
             detail="Two-stage config not loaded. "
-                   "Run python model/scoring.py first.",
+                   "Run the scoring evaluation pipeline first.",
         )
 
     from model.scoring import TIERS
@@ -584,12 +605,12 @@ async def fraud_tier_summary():
         })
 
     evaluation = config.get("evaluation", {}) if config else {}
-    pilot_pass = config.get("pilot_pass", {}) if config else {}
+    performance_criteria = config.get("pilot_pass", {}) if config else {}
 
     return {
-        "tiers":          tiers,
-        "evaluation":     evaluation,
-        "pilot_pass":     pilot_pass,
-        "two_stage":      two_stage,
-        "generated_at":   datetime.now().isoformat(),
+        "tiers":                tiers,
+        "evaluation":           evaluation,
+        "performance_criteria": performance_criteria,
+        "two_stage":            two_stage,
+        "generated_at":         datetime.now().isoformat(),
     }

@@ -1,0 +1,11 @@
+trip_id,driver_id,vehicle_category,pickup_zone,dropoff_zone,pickup_latitude,pickup_longitude,dropoff_latitude,dropoff_longitude,fare,distance_km,duration_min,payment_type,requested_at,status,zone_demand,complaint_flag
+PTR_DEMO_001,DRV_MASK_001,TWO_WHEELER,blr_koramangala,blr_whitefield,12.9352,77.6245,12.9698,77.7500,950,3.5,2.0,CASH,2026-04-08T22:30:00,completed,2.1,false
+PTR_DEMO_002,DRV_MASK_002,MINI,blr_jayanagar,blr_btm,12.9299,77.5833,12.9166,77.6101,180,4.2,18.0,UPI,2026-04-08T11:00:00,completed,0.9,false
+PTR_DEMO_003,DRV_MASK_003,TWO_WHEELER,mum_andheri,mum_bandra,19.1197,72.8464,19.0607,72.8364,410,7.1,24.0,CASH,2026-04-08T20:05:00,completed,1.6,true
+PTR_DEMO_004,DRV_MASK_004,THREE_WHEELER,hyd_hitech_city,hyd_madhapur,17.4504,78.3800,17.4384,78.3923,320,5.6,19.0,UPI,2026-04-08T09:10:00,completed,1.3,false
+PTR_DEMO_005,DRV_MASK_005,MINI,del_gurgaon_cybercity,del_saket,28.4940,77.0880,28.5245,77.2066,690,14.8,41.0,CARD,2026-04-08T18:25:00,completed,1.7,false
+PTR_DEMO_006,DRV_MASK_006,TWO_WHEELER,chn_adyar,chn_omr,13.0067,80.2570,12.9140,80.2279,540,11.2,36.0,CASH,2026-04-08T23:10:00,completed,1.4,false
+PTR_DEMO_007,DRV_MASK_007,MINI,pun_hinjewadi,pun_wakad,18.5912,73.7389,18.6074,73.7645,260,6.4,22.0,UPI,2026-04-08T08:40:00,completed,1.2,false
+PTR_DEMO_008,DRV_MASK_008,TWO_WHEELER,kol_saltlake,kol_newtown,22.5726,88.3639,22.5958,88.4677,300,9.3,29.0,WALLET,2026-04-08T12:15:00,completed,1.1,false
+PTR_DEMO_009,DRV_MASK_009,MINI,ahm_sg_highway,ahm_bopal,23.0381,72.5309,23.0300,72.4630,350,8.5,27.0,UPI,2026-04-08T15:45:00,completed,1.0,false
+PTR_DEMO_010,DRV_MASK_010,TWO_WHEELER,blr_indiranagar,blr_marathahalli,12.9784,77.6408,12.9591,77.6974,620,12.1,31.0,CASH,2026-04-08T21:20:00,completed,1.8,true

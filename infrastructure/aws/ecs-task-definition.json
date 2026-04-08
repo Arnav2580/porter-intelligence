@@ -4,12 +4,12 @@
   "requiresCompatibilities": ["FARGATE"],
   "cpu": "1024",
   "memory": "2048",
-  "executionRoleArn": "arn:aws:iam::ACCOUNT_ID:role/ecsTaskExecutionRole",
-  "taskRoleArn": "arn:aws:iam::ACCOUNT_ID:role/porterTaskRole",
+  "executionRoleArn": "arn:aws:iam::__ACCOUNT_ID__:role/__EXECUTION_ROLE_NAME__",
+  "taskRoleArn": "arn:aws:iam::__ACCOUNT_ID__:role/__TASK_ROLE_NAME__",
   "containerDefinitions": [
     {
       "name": "porter-api",
-      "image": "ACCOUNT_ID.dkr.ecr.ap-south-1.amazonaws.com/porter-intelligence:latest",
+      "image": "__IMAGE_URI__",
       "essential": true,
       "portMappings": [
         {
@@ -18,30 +18,32 @@
         }
       ],
       "environment": [
-        { "name": "APP_ENV",   "value": "production" },
-        { "name": "LOG_LEVEL", "value": "INFO"       },
-        { "name": "PORT",      "value": "8000"       }
+        { "name": "APP_ENV", "value": "production" },
+        { "name": "APP_RUNTIME_MODE", "value": "prod" },
+        { "name": "ENABLE_SYNTHETIC_FEED", "value": "false" },
+        { "name": "LOG_LEVEL", "value": "INFO" },
+        { "name": "PORT", "value": "8000" }
       ],
       "secrets": [
         {
           "name": "DATABASE_URL",
-          "valueFrom": "arn:aws:secretsmanager:ap-south-1:ACCOUNT_ID:secret:porter/prod/DATABASE_URL"
+          "valueFrom": "arn:aws:secretsmanager:__AWS_REGION__:__ACCOUNT_ID__:secret:porter/prod/DATABASE_URL"
         },
         {
           "name": "REDIS_URL",
-          "valueFrom": "arn:aws:secretsmanager:ap-south-1:ACCOUNT_ID:secret:porter/prod/REDIS_URL"
+          "valueFrom": "arn:aws:secretsmanager:__AWS_REGION__:__ACCOUNT_ID__:secret:porter/prod/REDIS_URL"
         },
         {
           "name": "JWT_SECRET_KEY",
-          "valueFrom": "arn:aws:secretsmanager:ap-south-1:ACCOUNT_ID:secret:porter/prod/JWT_SECRET_KEY"
+          "valueFrom": "arn:aws:secretsmanager:__AWS_REGION__:__ACCOUNT_ID__:secret:porter/prod/JWT_SECRET_KEY"
         },
         {
           "name": "ENCRYPTION_KEY",
-          "valueFrom": "arn:aws:secretsmanager:ap-south-1:ACCOUNT_ID:secret:porter/prod/ENCRYPTION_KEY"
+          "valueFrom": "arn:aws:secretsmanager:__AWS_REGION__:__ACCOUNT_ID__:secret:porter/prod/ENCRYPTION_KEY"
         },
         {
           "name": "WEBHOOK_SECRET",
-          "valueFrom": "arn:aws:secretsmanager:ap-south-1:ACCOUNT_ID:secret:porter/prod/WEBHOOK_SECRET"
+          "valueFrom": "arn:aws:secretsmanager:__AWS_REGION__:__ACCOUNT_ID__:secret:porter/prod/WEBHOOK_SECRET"
         }
       ],
       "healthCheck": {
@@ -58,7 +60,7 @@
         "logDriver": "awslogs",
         "options": {
           "awslogs-group": "/ecs/porter-intelligence",
-          "awslogs-region": "ap-south-1",
+          "awslogs-region": "__AWS_REGION__",
           "awslogs-stream-prefix": "ecs"
         }
       },

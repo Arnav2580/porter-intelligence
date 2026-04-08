@@ -68,3 +68,19 @@ def test_action_severity_levels():
     # 0.95 → flag
     r = asyncio.run(auto_enforce("D", "T", 0.95, "action", []))
     assert r["action"] == "flag"
+
+
+def test_auto_enforce_skips_when_shadow_mode_enabled(monkeypatch):
+    monkeypatch.setenv("SHADOW_MODE", "true")
+    from enforcement.dispatch import auto_enforce
+
+    result = asyncio.run(
+        auto_enforce(
+            driver_id="D001",
+            trip_id="T001",
+            fraud_probability=0.999,
+            tier="action",
+            top_signals=["test"],
+        )
+    )
+    assert result is None

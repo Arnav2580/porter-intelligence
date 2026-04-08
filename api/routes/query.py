@@ -4,7 +4,7 @@ from fastapi import APIRouter
 from pydantic import BaseModel
 from typing import Optional
 
-router = APIRouter()
+router = APIRouter(tags=["query"])
 
 
 class QueryRequest(BaseModel):
@@ -22,7 +22,7 @@ class QueryResponse(BaseModel):
 @router.post("/query", response_model=QueryResponse)
 async def natural_language_query(request: QueryRequest):
     """
-    Answer natural language queries about Porter fraud data.
+    Answer natural language questions about fraud, cases, and operations data.
 
     Examples:
       "Show me fraud rings in Bangalore"
@@ -30,8 +30,8 @@ async def natural_language_query(request: QueryRequest):
       "What zones have most fraud?"
       "Give me the KPI summary"
 
-    Structured queries answered in < 20ms.
-    LLM queries answered via Ollama in < 5s.
+    Structured queries are resolved from local data artifacts first.
+    Unstructured questions fall back to the local language model when available.
     """
     from api.state import app_state
     from model.query import answer_query

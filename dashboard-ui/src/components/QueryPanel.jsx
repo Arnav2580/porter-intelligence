@@ -47,7 +47,7 @@ export default function QueryPanel() {
       padding:       '20px',
     }}>
       <h3 style={{ fontFamily: 'var(--font-display)', fontSize: '14px', marginBottom: '12px', color: 'var(--orange)' }}>
-        QUERY ENGINE
+        OPERATIONS QUERY
       </h3>
 
       {/* Input form */}
@@ -56,7 +56,7 @@ export default function QueryPanel() {
           type="text"
           value={query}
           onChange={(e) => setQuery(e.target.value)}
-          placeholder="Ask about fraud data..."
+          placeholder="Ask about cases, fraud patterns, or city operations..."
           style={{
             flex:         1,
             padding:      '8px 12px',

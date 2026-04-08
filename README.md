@@ -2,6 +2,12 @@
 
 Enterprise ML fraud detection, demand forecasting, and fleet intelligence for large-scale logistics operations.
 
+## Documentation
+
+- [Documentation Hub](./docs/README.md)
+- [How It Works](./how%20it%20works/README.md)
+- [Founder Work Pack](./founders%20work/README.md)
+
 ## Modules
 
 - **Fraud Detection** — XGBoost two-stage classifier, 88.3% action-tier precision, 0.53% FPR
@@ -22,14 +28,15 @@ Enterprise ML fraud detection, demand forecasting, and fleet intelligence for la
 | Security | AES-256-GCM, JWT, RBAC |
 | Infrastructure | AWS ECS Fargate, RDS, ElastiCache |
 
-## Setup
+## Quick Start
 ```bash
-python3 -m venv venv && source venv/bin/activate
-pip install -r requirements.txt
-cp .env.example .env
-docker compose up -d
-uvicorn api.main:app --port 8000
+./scripts/local_up.sh
 ```
+
+Detailed deployment and runbooks:
+- [One-Command Setup](./docs/deployment/one-command-setup.md)
+- [Runbooks](./docs/runbooks/README.md)
+- [Handover Package](./docs/handover/README.md)
 
 ## API
 

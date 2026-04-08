@@ -5,22 +5,34 @@ Porter sends trip completion events to this endpoint.
 We score immediately, persist case if flagged,
 and return acknowledgement.
 
-This is Phase 3 infrastructure — built now,
-activated when Porter provides a data feed.
-The field mapping is a placeholder until
-Porter's engineering team confirms their schema.
+This endpoint is designed to support a future
+live data connection once Porter or another
+logistics operator shares a production schema.
+The event model below is a reference contract
+that can be remapped through the schema mapper.
 """
 
 from fastapi import (
     APIRouter, BackgroundTasks,
-    HTTPException, Header, Request
+    File, Form, HTTPException, Header, Request, UploadFile
 )
+import csv
+import io
+import json
 from pydantic import BaseModel
 from typing import Optional
 import hmac
 import hashlib
-import os
 import logging
+import os
+
+from api.limiting import limiter
+from security.settings import (
+    get_rate_limit,
+    get_required_secret,
+    is_placeholder_value,
+    require_webhook_signature,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -29,22 +41,13 @@ router = APIRouter(
     tags=["ingestion"],
 )
 
-WEBHOOK_SECRET = os.getenv(
-    "WEBHOOK_SECRET",
-    "change-this-before-connecting-porter"
-)
-
-
 class PorterTripEvent(BaseModel):
     """
     Porter trip completion event.
 
-    Field names are placeholders.
-    Actual field names confirmed with Porter's
-    engineering team during Phase 3 onboarding.
-    Map: trip_id, driver_id, coordinates,
-         fare, distance, duration, payment,
-         vehicle type, completion timestamp.
+    This is a reference contract for live onboarding.
+    Actual partner field names can be remapped through
+    the schema-mapping layer without changing scoring logic.
     """
     trip_id:          str
     driver_id:        str
@@ -65,12 +68,13 @@ class PorterTripEvent(BaseModel):
 def _verify_signature(
     payload: bytes,
     signature: Optional[str],
+    secret: str,
 ) -> bool:
     if not signature:
         return False
     try:
         expected = hmac.new(
-            WEBHOOK_SECRET.encode(),
+            secret.encode(),
             payload,
             hashlib.sha256
         ).hexdigest()
@@ -83,8 +87,8 @@ def _verify_signature(
 def _normalise(event: PorterTripEvent) -> dict:
     """
     Map Porter field names to platform schema.
-    Update this mapping after Phase 3
-    schema confirmation with Porter.
+    Update this mapping when a partner-specific
+    schema contract is confirmed.
     """
     payment_map = {
         "CASH":   "cash",
@@ -124,21 +128,29 @@ async def _publish_to_stream(normalised: dict) -> None:
     """
     Publish the normalised trip to the Redis Stream (Phase B primary path).
     The stream consumer handles stateless scoring + case persistence.
-    Falls back to inline pandas scoring if Redis is unavailable.
+    Falls back to PostgreSQL staging if Redis is unavailable.
     """
     try:
+        from ingestion.staging import drain_staged_trips
         from ingestion.streams import publish_trip
         msg_id = await publish_trip(normalised)
+        await drain_staged_trips(limit=50)
         logger.info(
             f"Trip {normalised['trip_id']} queued "
             f"on stream (msg={msg_id})"
         )
     except Exception as e:
+        from ingestion.staging import buffer_trip_payloads
         logger.warning(
             f"Stream unavailable ({e}), "
-            f"falling back to inline scoring"
+            f"buffering trip to staging"
         )
-        await _inline_score_and_persist(normalised)
+        await buffer_trip_payloads(
+            [normalised],
+            source="webhook",
+            mapping_name="porter_event",
+            error_message=str(e),
+        )
 
 
 async def _inline_score_and_persist(normalised: dict) -> None:
@@ -148,9 +160,8 @@ async def _inline_score_and_persist(normalised: dict) -> None:
     """
     try:
         from api.state import app_state
+        from database.case_store import persist_flagged_case
         from model.scoring import get_tier
-        from database.connection import AsyncSessionLocal
-        from database.models import FraudCase
 
         model         = app_state.get("model")
         feature_names = app_state.get("feature_names", [])
@@ -173,36 +184,25 @@ async def _inline_score_and_persist(normalised: dict) -> None:
         )
 
         if tier.name in ("action", "watchlist"):
-            trip_id_stored   = normalised["trip_id"]
-            driver_id_stored = normalised["driver_id"]
-            try:
-                from security.encryption import encrypt_pii
-                trip_id_stored   = encrypt_pii(trip_id_stored)
-                driver_id_stored = encrypt_pii(driver_id_stored)
-            except Exception:
-                pass
-
-            async with AsyncSessionLocal() as db:
-                case = FraudCase(
-                    trip_id           = trip_id_stored,
-                    driver_id         = driver_id_stored,
-                    zone_id           = normalised.get(
-                        "pickup_zone_id", "unknown"
-                    ),
-                    tier              = tier.name,
-                    fraud_probability = round(prob, 4),
-                    fare_inr          = normalised.get("fare_inr", 0),
-                    recoverable_inr   = round(
-                        normalised.get("fare_inr", 0) * 0.15, 2
-                    ),
-                    auto_escalated    = tier.auto_escalate,
-                )
-                db.add(case)
-                await db.commit()
-                logger.info(
-                    f"[inline] case persisted: "
-                    f"trip={normalised['trip_id']} tier={tier.name}"
-                )
+            await persist_flagged_case(
+                trip_id=normalised["trip_id"],
+                driver_id=normalised["driver_id"],
+                zone_id=normalised.get("pickup_zone_id", "unknown"),
+                tier=tier.name,
+                fraud_probability=prob,
+                top_signals=[],
+                fare_inr=normalised.get("fare_inr", 0),
+                recoverable_inr=round(
+                    normalised.get("fare_inr", 0) * 0.15,
+                    2,
+                ),
+                auto_escalated=tier.auto_escalate,
+                source_channel="inline_webhook",
+            )
+            logger.info(
+                f"[inline] case persisted: "
+                f"trip={normalised['trip_id']} tier={tier.name}"
+            )
 
     except Exception as e:
         logger.error(
@@ -212,9 +212,10 @@ async def _inline_score_and_persist(normalised: dict) -> None:
 
 
 @router.post("/trip-completed")
+@limiter.limit(get_rate_limit("INGEST_RATE_LIMIT", "300/minute"))
 async def ingest_trip(
-    event:       PorterTripEvent,
     request:     Request,
+    event:       PorterTripEvent,
     background:  BackgroundTasks,
     x_signature: Optional[str] = Header(
         None, alias="X-Porter-Signature"
@@ -230,9 +231,14 @@ async def ingest_trip(
     """
     # Verify signature if provided
     # In production this is required
-    if x_signature:
+    signature_required = require_webhook_signature()
+    if signature_required or x_signature:
+        secret = get_required_secret(
+            "WEBHOOK_SECRET",
+            "webhook signature verification",
+        )
         body = await request.body()
-        if not _verify_signature(body, x_signature):
+        if not _verify_signature(body, x_signature, secret):
             raise HTTPException(
                 status_code=401,
                 detail="Invalid webhook signature"
@@ -248,6 +254,127 @@ async def ingest_trip(
     }
 
 
+async def _queue_csv_payloads(
+    payloads: list[dict],
+    *,
+    source: str,
+    mapping_name: str,
+) -> dict:
+    from database.redis_client import ping_redis
+    from ingestion.staging import buffer_trip_payloads, drain_staged_trips
+    from ingestion.streams import publish_trip
+
+    if not payloads:
+        return {
+            "accepted": True,
+            "rows": 0,
+            "queued": False,
+            "queue_mode": "empty",
+            "staged_rows": 0,
+            "published_rows": 0,
+        }
+
+    if not await ping_redis():
+        staged = await buffer_trip_payloads(
+            payloads,
+            source=source,
+            mapping_name=mapping_name,
+            error_message="Redis unavailable during upload",
+        )
+        return {
+            "accepted": True,
+            "rows": len(payloads),
+            "queued": True,
+            "queue_mode": "postgres_staging",
+            "staged_rows": staged,
+            "published_rows": 0,
+            "mapping_name": mapping_name,
+        }
+
+    published = 0
+    for index, payload in enumerate(payloads):
+        try:
+            await publish_trip(payload)
+            published += 1
+        except Exception as exc:
+            remaining = payloads[index:]
+            staged = await buffer_trip_payloads(
+                remaining,
+                source=source,
+                mapping_name=mapping_name,
+                error_message=str(exc),
+            )
+            return {
+                "accepted": True,
+                "rows": len(payloads),
+                "queued": True,
+                "queue_mode": "redis_with_stage_fallback",
+                "staged_rows": staged,
+                "published_rows": published,
+                "mapping_name": mapping_name,
+            }
+
+    drain_result = await drain_staged_trips(limit=100)
+    return {
+        "accepted": True,
+        "rows": len(payloads),
+        "queued": True,
+        "queue_mode": "redis_stream",
+        "staged_rows": 0,
+        "published_rows": published,
+        "mapping_name": mapping_name,
+        "drain_result": drain_result,
+    }
+
+
+@router.post("/batch-csv")
+@limiter.limit(get_rate_limit("INGEST_RATE_LIMIT", "300/minute"))
+async def ingest_batch_csv(
+    request: Request,
+    file: UploadFile = File(...),
+    mapping_file: Optional[UploadFile] = File(None),
+    mapping_name: str = Form("default"),
+):
+    """Accept a CSV upload, map rows, and queue them for scoring."""
+    from ingestion.schema_mapper import SchemaMapper
+
+    raw_csv = await file.read()
+    if not raw_csv:
+        raise HTTPException(status_code=400, detail="Uploaded CSV is empty")
+
+    if mapping_file is not None:
+        mapper = SchemaMapper.from_json_bytes(
+            await mapping_file.read(),
+            mapping_name=mapping_name or "uploaded",
+        )
+    else:
+        mapper = SchemaMapper.from_file(mapping_name=mapping_name)
+
+    text = raw_csv.decode("utf-8")
+    rows = list(csv.DictReader(io.StringIO(text)))
+    if not rows:
+        raise HTTPException(
+            status_code=400,
+            detail="CSV contains no data rows",
+        )
+
+    try:
+        mapped_rows = [mapper.map_row(row) for row in rows]
+    except Exception as exc:
+        raise HTTPException(
+            status_code=400,
+            detail=f"CSV mapping failed: {exc}",
+        ) from exc
+
+    result = await _queue_csv_payloads(
+        mapped_rows,
+        source="batch_csv",
+        mapping_name=mapper.mapping_name,
+    )
+    result["filename"] = file.filename
+    return result
+
+
 @router.get("/status")
 async def ingestion_status():
     """
@@ -255,14 +382,39 @@ async def ingestion_status():
     Shows whether the webhook is configured
     and ready to receive Porter events.
     """
+    webhook_secret = (os.getenv("WEBHOOK_SECRET") or "").strip()
+    from ingestion.staging import get_queue_status_summary
+    queue_status = await get_queue_status_summary(auto_drain=True)
     return {
         "status":          "ready",
         "webhook_url":     "/ingest/trip-completed",
-        "signature_check": WEBHOOK_SECRET != \
-            "change-this-before-connecting-porter",
+        "signature_check": require_webhook_signature(),
+        "webhook_secret_configured": not is_placeholder_value(
+            webhook_secret
+        ),
+        "queue_status": queue_status,
         "note": (
-            "Signature check is disabled until "
-            "Porter provides WEBHOOK_SECRET. "
-            "Activate in Phase 3."
+            "In prod mode a configured WEBHOOK_SECRET and signed requests "
+            "are required before live ingestion should be enabled."
+        ),
+    }
+
+
+@router.get("/schema-map/default")
+async def default_schema_map():
+    """Expose the default alias map so live mapping can be shown quickly."""
+    from ingestion.schema_mapper import DEFAULT_SCHEMA_MAP_PATH
+
+    with DEFAULT_SCHEMA_MAP_PATH.open() as handle:
+        alias_map = json.load(handle)
+
+    return {
+        "mapping_name": "default",
+        "field_count": len(alias_map),
+        "aliases": alias_map,
+        "sample_template": "/data/samples/porter_sample_10_trips.csv",
+        "note": (
+            "Use this mapping surface during onboarding to show exactly how "
+            "external partner fields are normalized into the scoring schema."
         ),
     }

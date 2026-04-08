@@ -11,6 +11,7 @@ from fastapi.security import (
 
 from auth.jwt import verify_token
 from auth.models import ROLE_PERMISSIONS, UserRole
+from security.settings import SecurityConfigurationError
 
 oauth2_scheme = OAuth2PasswordBearer(
     tokenUrl="/auth/token",
@@ -37,7 +38,13 @@ async def get_current_user(
             headers={"WWW-Authenticate": "Bearer"},
         )
 
-    payload = verify_token(raw_token)
+    try:
+        payload = verify_token(raw_token)
+    except SecurityConfigurationError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=str(exc),
+        ) from exc
     if not payload:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,

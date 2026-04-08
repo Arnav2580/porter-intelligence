@@ -1,0 +1,8 @@
+[build]
+base = "dashboard-ui"
+publish = "dist"
+command = "npm run build"
+
+[build.environment]
+# Set VITE_API_BASE_URL in Netlify when the API is hosted on a different
+# domain. Leave unset only if the deployed site has a same-origin proxy.

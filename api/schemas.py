@@ -4,7 +4,7 @@ All Pydantic models for API validation.
 """
 
 from pydantic import BaseModel, Field
-from typing import Optional, List, Dict
+from typing import Optional, List, Dict, Union
 
 
 class TripScoreRequest(BaseModel):
@@ -94,19 +94,42 @@ class LiveFeedResponse(BaseModel):
 
 
 class KPISummaryResponse(BaseModel):
-    window_label:           str
-    total_trips:            int
-    fraud_detected:         int
-    fraud_rate_pct:         float
-    baseline_caught:        int
-    xgboost_caught:         int
-    improvement_pct:        float
-    net_recoverable_inr:    float
-    net_recoverable_per_trip: float
-    fpr_pct:                float
-    annual_recovery_crore:  float
-    royalty_crore:          float
-    pilot_criteria_pass:    Dict[str, bool]
+    evaluation_window_label: str = Field(
+        description="Human-readable description of the evaluation window."
+    )
+    total_trips: int = Field(
+        description="Total trips evaluated in the benchmark window."
+    )
+    fraud_detected: int = Field(
+        description="High-confidence fraud cases caught by the benchmark model."
+    )
+    fraud_rate_pct: float = Field(
+        description="Observed fraud incidence within the evaluation dataset."
+    )
+    baseline_caught: int = Field(
+        description="Fraud cases caught by the baseline ruleset."
+    )
+    xgboost_caught: int = Field(
+        description="Fraud cases caught by the scored model."
+    )
+    improvement_pct: float = Field(
+        description="Detection lift over the baseline ruleset."
+    )
+    net_recoverable_inr: float = Field(
+        description="Estimated net recoverable value in INR for the evaluated window."
+    )
+    net_recoverable_per_trip: float = Field(
+        description="Estimated net recoverable value per trip."
+    )
+    fpr_pct: float = Field(
+        description="False positive rate for the scored model."
+    )
+    projected_annual_recovery_crore: float = Field(
+        description="Annualised recovery projection in crore INR."
+    )
+    performance_criteria: Dict[str, bool] = Field(
+        description="Pass/fail summary for benchmark performance gates."
+    )
 
 
 class DriverRiskResponse(BaseModel):
@@ -117,3 +140,51 @@ class DriverRiskResponse(BaseModel):
     cancel_velocity:   float
     ring_member:       bool
     recommendation:    str
+
+
+class ROICalculationRequest(BaseModel):
+    gmv_crore: float = Field(
+        gt=0,
+        description="Annual GMV in crore INR used for savings-to-GMV framing.",
+    )
+    trips_per_day: int = Field(
+        gt=0,
+        description="Average completed trips per day.",
+    )
+    fraud_rate_pct: float = Field(
+        gt=0,
+        le=100,
+        description="Estimated fraud or leakage incidence as a percent of trips.",
+    )
+    platform_price_crore: float = Field(
+        default=3.25,
+        gt=0,
+        description="Commercial price used for payback and ROI calculations.",
+    )
+
+
+class ROIScenario(BaseModel):
+    scenario: str
+    realization_multiplier: float
+    annual_savings_crore: float
+    monthly_savings_lakh: float
+    payback_months: float
+    payback_days: int
+    roi_pct: float
+    savings_pct_of_gmv: float
+    savings_bps_of_gmv: float
+    note: str
+
+
+class ROICalculationResponse(BaseModel):
+    annual_savings_crore: float
+    payback_months: float
+    roi_pct: float
+    benchmark_net_recoverable_per_trip: float
+    benchmark_fraud_rate_pct: float
+    platform_price_crore: float
+    annual_trip_volume: int
+    savings_pct_of_gmv: float
+    savings_bps_of_gmv: float
+    scenarios: List[ROIScenario]
+    assumptions: Dict[str, Union[float, int, str]]

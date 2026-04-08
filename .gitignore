@@ -34,3 +34,6 @@ _archive/
 
 # Local Netlify folder
 .netlify
+
+# AWS local provisioning state
+infrastructure/aws/state/

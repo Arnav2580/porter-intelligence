@@ -35,9 +35,18 @@ services:
       DATABASE_URL: postgresql+asyncpg://porter:porter@postgres:5432/porter_intelligence
       REDIS_URL: redis://redis:6379
       APP_ENV: production
+      APP_RUNTIME_MODE: prod
+      ENABLE_SYNTHETIC_FEED: "false"
+      SHADOW_MODE: "false"
       LOG_LEVEL: info
-      JWT_SECRET_KEY: ${JWT_SECRET_KEY:-change-me}
-      ENCRYPTION_KEY: ${ENCRYPTION_KEY:-EXBtipXs6jmJR5swf0tO06vd9cS4Nvt9fyjlX1gjz88=}
+      JWT_SECRET_KEY: ${JWT_SECRET_KEY:?JWT_SECRET_KEY must be set}
+      ENCRYPTION_KEY: ${ENCRYPTION_KEY:?ENCRYPTION_KEY must be set}
+      WEBHOOK_SECRET: ${WEBHOOK_SECRET:?WEBHOOK_SECRET must be set}
+      API_ALLOWED_ORIGINS: ${API_ALLOWED_ORIGINS:?API_ALLOWED_ORIGINS must be set}
+      PORTER_AUTH_ADMIN_PASSWORD: ${PORTER_AUTH_ADMIN_PASSWORD:?PORTER_AUTH_ADMIN_PASSWORD must be set}
+      PORTER_AUTH_OPS_MANAGER_PASSWORD: ${PORTER_AUTH_OPS_MANAGER_PASSWORD:?PORTER_AUTH_OPS_MANAGER_PASSWORD must be set}
+      PORTER_AUTH_ANALYST_PASSWORD: ${PORTER_AUTH_ANALYST_PASSWORD:?PORTER_AUTH_ANALYST_PASSWORD must be set}
+      PORTER_AUTH_VIEWER_PASSWORD: ${PORTER_AUTH_VIEWER_PASSWORD:?PORTER_AUTH_VIEWER_PASSWORD must be set}
     volumes:
       - ./data:/app/data
       - ./model/weights:/app/model/weights
@@ -71,7 +80,7 @@ services:
       - "3001:3000"
     environment:
       GF_SECURITY_ADMIN_USER:     admin
-      GF_SECURITY_ADMIN_PASSWORD: Porter2024!
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:?GRAFANA_ADMIN_PASSWORD must be set}
       GF_USERS_ALLOW_SIGN_UP:     "false"
       GF_AUTH_ANONYMOUS_ENABLED:  "false"
     volumes:

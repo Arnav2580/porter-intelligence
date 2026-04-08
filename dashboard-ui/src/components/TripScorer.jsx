@@ -1,5 +1,5 @@
-import React, { useState } from 'react';
-import { apiPost } from '../utils/api';
+import React, { useEffect, useState } from 'react';
+import { apiGet, apiPost } from '../utils/api';
 
 const ZONE_OPTIONS = [
   { id: 'blr_koramangala',     label: 'Koramangala' },
@@ -55,10 +55,27 @@ export default function TripScorer() {
     is_peak_hour:         false,
     zone_demand_at_time:  2.1,
   });
+  const [scenarios, setScenarios] = useState([]);
+  const [activeScenarioId, setActiveScenarioId] = useState('');
   const [result, setResult]   = useState(null);
   const [loading, setLoading] = useState(false);
 
   const update = (k, v) => setForm(f => ({ ...f, [k]: v }));
+
+  useEffect(() => {
+    apiGet('/demo/scenarios')
+      .then((payload) => setScenarios(payload.scenarios || []))
+      .catch(() => setScenarios([]));
+  }, []);
+
+  const applyScenario = (scenario) => {
+    setActiveScenarioId(scenario.id);
+    setForm((current) => ({
+      ...current,
+      ...scenario.form_patch,
+    }));
+    setResult(null);
+  };
 
   const score = async () => {
     setLoading(true);
@@ -109,6 +126,45 @@ export default function TripScorer() {
       <div className="section-label" style={{marginBottom: 12}}>
         Live Trip Scorer
       </div>
+
+      {scenarios.length > 0 && (
+        <div style={{
+          display: 'grid',
+          gap: 10,
+          marginBottom: 14,
+        }}>
+          <div style={{ fontSize: 10, letterSpacing: '0.08em', textTransform: 'uppercase', color: 'var(--muted)' }}>
+            Preloaded Demo Scenarios
+          </div>
+          <div style={{ display: 'grid', gap: 8 }}>
+            {scenarios.map((scenario) => (
+              <button
+                key={scenario.id}
+                type="button"
+                onClick={() => applyScenario(scenario)}
+                style={{
+                  textAlign: 'left',
+                  background: activeScenarioId === scenario.id
+                    ? 'rgba(249,115,22,0.12)'
+                    : 'rgba(15,23,42,0.7)',
+                  border: activeScenarioId === scenario.id
+                    ? '1px solid rgba(249,115,22,0.4)'
+                    : '1px solid rgba(148,163,184,0.16)',
+                  borderRadius: 10,
+                  padding: '10px 12px',
+                  cursor: 'pointer',
+                  color: 'var(--text)',
+                }}
+              >
+                <div style={{ fontSize: 12, fontWeight: 700 }}>{scenario.label}</div>
+                <div style={{ fontSize: 11, color: 'var(--muted)', lineHeight: 1.55, marginTop: 4 }}>
+                  {scenario.story}
+                </div>
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
 
       <div className="scorer-form">
         <div className="form-group">

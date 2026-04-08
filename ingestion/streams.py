@@ -104,9 +104,8 @@ async def consume_loop() -> None:
 async def _score_and_persist(trip: Dict, msg_id: str) -> None:
     """Score one trip from the stream and persist a FraudCase if flagged."""
     from api.state import app_state
+    from database.case_store import persist_flagged_case
     from model.scoring import get_tier
-    from database.connection import AsyncSessionLocal
-    from database.models import FraudCase
 
     model         = app_state.get("model")
     feature_names = app_state.get("feature_names", [])
@@ -136,36 +135,25 @@ async def _score_and_persist(trip: Dict, msg_id: str) -> None:
         pass
 
     if tier.name in ("action", "watchlist"):
-        trip_id_stored   = trip.get("trip_id", msg_id)
-        driver_id_stored = trip.get("driver_id", "unknown")
-
-        # Encrypt PII before persistence
-        try:
-            from security.encryption import encrypt_pii
-            trip_id_stored   = encrypt_pii(trip_id_stored)
-            driver_id_stored = encrypt_pii(driver_id_stored)
-        except Exception:
-            pass   # encryption optional — falls back to plaintext in dev
-
-        async with AsyncSessionLocal() as db:
-            case = FraudCase(
-                trip_id           = trip_id_stored,
-                driver_id         = driver_id_stored,
-                zone_id           = trip.get("pickup_zone_id", "unknown"),
-                tier              = tier.name,
-                fraud_probability = round(fraud_prob, 4),
-                fare_inr          = trip.get("fare_inr", 0),
-                recoverable_inr   = round(
-                    trip.get("fare_inr", 0) * 0.15, 2
-                ),
-                auto_escalated    = tier.auto_escalate,
-            )
-            db.add(case)
-            await db.commit()
-            logger.info(
-                f"[stream] case persisted: "
-                f"trip={trip.get('trip_id')} tier={tier.name}"
-            )
+        await persist_flagged_case(
+            trip_id=str(trip.get("trip_id", msg_id)),
+            driver_id=str(trip.get("driver_id", "unknown")),
+            zone_id=trip.get("pickup_zone_id", "unknown"),
+            tier=tier.name,
+            fraud_probability=fraud_prob,
+            top_signals=[],
+            fare_inr=trip.get("fare_inr", 0),
+            recoverable_inr=round(
+                trip.get("fare_inr", 0) * 0.15,
+                2,
+            ),
+            auto_escalated=tier.auto_escalate,
+            source_channel="redis_stream",
+        )
+        logger.info(
+            f"[stream] case persisted: "
+            f"trip={trip.get('trip_id')} tier={tier.name}"
+        )
 
 
 async def get_stream_lag() -> int:

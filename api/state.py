@@ -17,7 +17,10 @@ from typing import Dict
 
 from generator.config import MODEL_WEIGHTS, DATA_RAW
 from database.connection import init_db
+from database.redis_client import cache_set
 from logging_config import setup_logging
+from runtime_config import get_runtime_settings
+from security.settings import validate_security_configuration
 
 # -- Global state (loaded at startup) --
 app_state: Dict = {}
@@ -34,7 +37,31 @@ async def lifespan(app):
     from generator.cities import ZONES
 
     setup_logging(os.getenv("LOG_LEVEL", "INFO"))
+    runtime = get_runtime_settings()
+    app_state["runtime_mode"] = runtime.mode.value
+    app_state["synthetic_feed_enabled"] = (
+        runtime.synthetic_feed_enabled
+    )
+    app_state["shadow_mode"] = runtime.shadow_mode
+    security_validation = validate_security_configuration()
+    app_state["security_validation"] = (
+        security_validation.to_dict()
+    )
+    for warning in security_validation.warnings:
+        console_log(f"⚠️  Security warning: {warning}")
+    if security_validation.errors:
+        for error in security_validation.errors:
+            console_log(f"❌ Security config error: {error}")
+        if runtime.is_prod:
+            raise RuntimeError(
+                "Security configuration invalid for prod runtime."
+            )
     console_log("Loading Porter Intelligence Platform...")
+    console_log(
+        f"Runtime mode: {runtime.mode.value} | "
+        f"synthetic_feed_enabled={runtime.synthetic_feed_enabled} | "
+        f"shadow_mode={runtime.shadow_mode}"
+    )
 
     # Load XGBoost model
     model_path = MODEL_WEIGHTS / "xgb_fraud_model.json"
@@ -199,6 +226,11 @@ async def lifespan(app):
                 "utilisation": utilisation,
                 "suggestions": suggestions,
             }
+            await cache_set(
+                "route-efficiency:bootstrap",
+                app_state["efficiency_cache"],
+                ttl_seconds=3600,
+            )
             app_state["efficiency_cache_hour"] = datetime.now().hour
             console_log(
                 f"Route efficiency cache ready "
@@ -223,6 +255,11 @@ async def lifespan(app):
                 ),
                 timeout=20.0,
             )
+            await cache_set(
+                "driver-intelligence:bootstrap",
+                app_state["top_risk_cache"],
+                ttl_seconds=3600,
+            )
             app_state["top_risk_cache_hour"] = datetime.now().hour
             console_log("Driver risk cache ready")
         except asyncio.TimeoutError:
@@ -238,6 +275,33 @@ async def lifespan(app):
         console_log("✅ Stream consumer task started")
     except Exception as e:
         console_log(f"⚠️  Stream consumer failed to start: {e}")
+
+    _simulator_task = None
+    if runtime.synthetic_feed_enabled:
+        try:
+            from ingestion.live_simulator import (
+                get_simulator_summary,
+                run_live_simulator,
+            )
+            app_state["simulator_summary"] = (
+                get_simulator_summary()
+            )
+            _simulator_task = asyncio.create_task(
+                run_live_simulator()
+            )
+            console_log(
+                "✅ Synthetic feed started "
+                f"({app_state['simulator_summary']['effective_trips_per_min']:.1f} trips/min, "
+                f"{app_state['simulator_summary']['city_count']} cities, "
+                f"{app_state['simulator_summary']['base_fraud_rate_pct']:.1f}% base fraud)"
+            )
+        except Exception as e:
+            console_log(f"⚠️  Synthetic feed failed to start: {e}")
+    else:
+        app_state["simulator_summary"] = None
+        console_log(
+            "Synthetic feed disabled for this runtime mode"
+        )
 
     # Start APScheduler for drift detection + stream lag (Phase C)
     _scheduler = None
@@ -272,6 +336,13 @@ async def lifespan(app):
     yield
 
     # Cleanup
+    if _simulator_task is not None:
+        _simulator_task.cancel()
+        try:
+            await _simulator_task
+        except asyncio.CancelledError:
+            pass
+
     if _consumer_task is not None:
         _consumer_task.cancel()
         try:
