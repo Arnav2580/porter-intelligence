@@ -205,11 +205,3 @@ def build_roi_response(body: ROICalculationRequest) -> ROICalculationResponse:
 
 def get_default_board_pack_inputs() -> dict:
     return dict(_DEFAULT_BOARD_PACK_INPUTS)
-
-
-@router.post(
-    "/calculate",
-    response_model=ROICalculationResponse,
-)
-async def calculate_roi(body: ROICalculationRequest):
-    return build_roi_response(body)
