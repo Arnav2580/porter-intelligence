@@ -78,8 +78,27 @@ infrastructure/aws/state/
 .claude/
 .claude/settings.local.json
 
-# ── Archive (not needed for deployment — kept locally for reference) ─────────
+# ── Archive (local only — internal/sales docs, never public) ─────────────────
 _archive/
+
+# ── Trained model weights (core IP — local only) ─────────────────────────────
+model/weights/*.pkl
+model/weights/*.json
+model/weights/*.ubj
+# model/weights/README.md is intentionally kept
+
+# ── Raw and synthetic datasets (regenerate locally, never public) ─────────────
+data/raw/customers_sample_1000.csv
+data/raw/drivers_sample_1000.csv
+data/raw/trips_with_fraud_10k.csv
+data/raw/evaluation_report.json
+
+# ── Internal docs (handover terms, demo scripts, security runbooks) ───────────
+docs/handover/
+docs/demo/
+docs/security/
+docs/runbooks/rotate-secrets.md
+docs/runbooks/restore-from-backup.md
 
 # ── Miscellaneous scratch files ──────────────────────────────────────────────
 *.tmp
