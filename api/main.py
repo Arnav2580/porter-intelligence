@@ -146,6 +146,7 @@ from api.routes.roi import router as roi_router
 from api.routes.route_efficiency import router as efficiency_router
 from api.routes.shadow import router as shadow_router
 from api.routes.live_kpi import router as live_kpi_router
+from api.routes.legal import router as legal_router
 from ingestion.webhook import router as ingest_router
 
 app.include_router(inference_router)
@@ -159,6 +160,7 @@ app.include_router(roi_router)
 app.include_router(efficiency_router)
 app.include_router(shadow_router)
 app.include_router(live_kpi_router)
+app.include_router(legal_router)
 app.include_router(ingest_router)
 
 
