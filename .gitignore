@@ -1,39 +1,88 @@
+# =============================================================================
+# Porter Intelligence Platform — .gitignore
+# =============================================================================
+
+# ── Python ───────────────────────────────────────────────────────────────────
 venv/
 __pycache__/
 *.pyc
 *.pyo
+*.pyd
+*.so
+*.egg
+*.egg-info/
+.eggs/
+dist/
+build/
+.Python
+
+# ── Environment / Secrets ────────────────────────────────────────────────────
+# NEVER commit real credentials — use .env.example as the template
 .env
-# Full scale CSVs — too large for git
-# Regenerate with: python generate_full.py
+.env.local
+.env.*.local
+!.env.example
+!.env.production
+
+# ── Large generated datasets (regenerate with generate_full.py) ──────────────
 data/raw/trips_full.csv
 data/raw/trips_full_fraud.csv
 data/raw/drivers_full.csv
 data/raw/customers_full.csv
-
-# Other generated data
 data/masked/*.csv
 data/blind_test/*.csv
 
-# Model weights — committed for Railway deployment (Option A)
-# To regenerate: python train.py
+# ── Model weight formats not used (committed .json and .pkl are intentional) ─
 model/weights/*.ubj
-.DS_Store
-.pytest_cache/
-*.egg-info/
-dist/
-build/
-.claude/settings.local.json
-remember.md
-review_report.md
-.claude
-.claude/
-_archive/data/raw/trips_full.csv
-.claude
-.claude/
-_archive/
 
-# Local Netlify folder
+# ── Logs ─────────────────────────────────────────────────────────────────────
+logs/
+*.log
+log/
+
+# ── OS / Editor ──────────────────────────────────────────────────────────────
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+*.suo
+*.swp
+*.swo
+
+# ── Testing / Coverage ───────────────────────────────────────────────────────
+.pytest_cache/
+.coverage
+htmlcov/
+coverage.xml
+*.cover
+
+# ── Frontend ─────────────────────────────────────────────────────────────────
+dashboard-ui/node_modules/
+dashboard-ui/.env
+# .env.production is committed (contains no secrets — only VITE_API_BASE_URL)
+dashboard-ui/dist/
+
+# ── Deployment / Hosting ─────────────────────────────────────────────────────
+# Netlify local state
 .netlify
+dashboard-ui/.netlify/
+
+# Vercel local state
+.vercel
+dashboard-ui/.vercel/
 
 # AWS local provisioning state
 infrastructure/aws/state/
+
+# ── Claude Code local settings ───────────────────────────────────────────────
+.claude/
+.claude/settings.local.json
+
+# ── Archive (not needed for deployment — kept locally for reference) ─────────
+_archive/
+
+# ── Miscellaneous scratch files ──────────────────────────────────────────────
+*.tmp
+*.bak
+*.orig
+scratch/
