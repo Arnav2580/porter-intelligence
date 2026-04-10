@@ -7,12 +7,77 @@ on:
     branches: [main]
 
 jobs:
-  test:
+  backend:
+    name: Backend — Tests, Lint, Security
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
         with:
           python-version: "3.11"
-      - run: pip install -r requirements.txt
-      - run: pytest tests/test_model.py tests/test_auth.py -v
+          cache: pip
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install ruff pip-audit cyclonedx-bom
+
+      - name: Lint (ruff)
+        run: |
+          ruff check api/ auth/ database/ enforcement/ ingestion/ ml/ model/ monitoring/ security/ \
+            --select=E,F,W,I --ignore=E501,E402 || true
+
+      - name: Run full test suite
+        env:
+          JWT_SECRET_KEY: ci-test-secret-key-not-for-production-use-only-in-ci
+          PORTER_RUNTIME_MODE: test
+        run: pytest tests/ -v --tb=short
+
+      - name: Dependency vulnerability scan (pip-audit)
+        run: pip-audit -r requirements.txt --strict --ignore-vuln PYSEC-2022-42969 || true
+        continue-on-error: true
+
+      - name: Generate SBOM (CycloneDX)
+        run: |
+          cyclonedx-py requirements -i requirements.txt -o sbom-python.json || \
+          cyclonedx-py -r -i requirements.txt -o sbom-python.json
+        continue-on-error: true
+
+      - name: Upload SBOM artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: sbom-python
+          path: sbom-python.json
+          if-no-files-found: warn
+
+  frontend:
+    name: Frontend — Build
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: dashboard-ui
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: dashboard-ui/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci || npm install
+
+      - name: Build (Vite)
+        run: npm run build
+
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: dashboard-dist
+          path: dashboard-ui/dist
+          if-no-files-found: error

@@ -1,0 +1,234 @@
+groups:
+  # ── Scoring health ──────────────────────────────────────────────────────────
+  - name: porter.scoring
+    rules:
+      - alert: ScoringLatencyHigh
+        expr: |
+          histogram_quantile(0.95,
+            rate(porter_scoring_latency_seconds_bucket[5m])
+          ) > 0.05
+        for: 5m
+        labels:
+          severity: warning
+          team: porter-platform
+        annotations:
+          summary: "Scoring p95 latency above 50 ms"
+          description: >
+            porter_scoring_latency_seconds p95 is {{ $value | humanizeDuration }}.
+            Baseline p95 is ~0.18 ms stateless. Investigate Redis latency or
+            model reload under load.
+          runbook: "docs/runbooks/scoring-latency.md"
+
+      - alert: ScoringLatencyCritical
+        expr: |
+          histogram_quantile(0.95,
+            rate(porter_scoring_latency_seconds_bucket[5m])
+          ) > 0.2
+        for: 2m
+        labels:
+          severity: critical
+          team: porter-platform
+        annotations:
+          summary: "Scoring p95 latency above 200 ms — SLO breach"
+          description: >
+            porter_scoring_latency_seconds p95 is {{ $value | humanizeDuration }}.
+            This breaches the 200 ms SLO. Restart the API pod and check for
+            Redis timeouts or OOM.
+          runbook: "docs/runbooks/scoring-latency.md"
+
+      - alert: ScoringRateZero
+        expr: |
+          rate(porter_trips_scored_total[10m]) == 0
+        for: 10m
+        labels:
+          severity: warning
+          team: porter-platform
+        annotations:
+          summary: "No trips scored in the last 10 minutes"
+          description: >
+            porter_trips_scored_total rate is zero for 10 m. The model endpoint
+            may be failing silently or the ingestion pipeline has stopped.
+          runbook: "docs/runbooks/scoring-failure.md"
+
+      - alert: NoCaseCreationFor2Hours
+        expr: |
+          increase(porter_fraud_cases_created_total[2h]) == 0
+        for: 0m
+        labels:
+          severity: warning
+          team: porter-platform
+        annotations:
+          summary: "Zero fraud cases created in 2 hours"
+          description: >
+            No fraud cases have been created in the last 2 hours.
+            Either trip volume is zero, model thresholds are misaligned, or
+            the case-write path has silently failed.
+          runbook: "docs/runbooks/scoring-failure.md"
+
+  # ── HTTP / API health ───────────────────────────────────────────────────────
+  - name: porter.api
+    rules:
+      - alert: APILatencyHigh
+        expr: |
+          histogram_quantile(0.95,
+            rate(porter_http_request_duration_seconds_bucket{endpoint="/fraud/score"}[5m])
+          ) > 0.2
+        for: 5m
+        labels:
+          severity: warning
+          team: porter-platform
+        annotations:
+          summary: "POST /fraud/score p95 latency above 200 ms"
+          description: >
+            HTTP p95 for /fraud/score is {{ $value | humanizeDuration }}.
+            Expected < 10 ms on loopback, < 50 ms on deployed infra.
+          runbook: "docs/runbooks/api-latency.md"
+
+      - alert: APIHighErrorRate
+        expr: |
+          rate(porter_http_request_duration_seconds_count{status=~"5.."}[5m])
+          /
+          rate(porter_http_request_duration_seconds_count[5m])
+          > 0.01
+        for: 5m
+        labels:
+          severity: critical
+          team: porter-platform
+        annotations:
+          summary: "API 5xx error rate above 1%"
+          description: >
+            HTTP 5xx error rate is {{ $value | humanizePercentage }} over the
+            last 5 minutes. Check API logs for exceptions.
+          runbook: "docs/runbooks/api-errors.md"
+
+  # ── Redis Streams queue lag ─────────────────────────────────────────────────
+  - name: porter.queue
+    rules:
+      - alert: StreamLagHigh
+        expr: porter_stream_lag_messages > 1000
+        for: 5m
+        labels:
+          severity: warning
+          team: porter-platform
+        annotations:
+          summary: "Redis Stream consumer lag above 1,000 messages"
+          description: >
+            porter_stream_lag_messages is {{ $value }}. The ingestion consumer
+            is falling behind. Scale consumer replicas or investigate blocking
+            I/O in the scoring path.
+          runbook: "docs/runbooks/queue-lag.md"
+
+      - alert: StreamLagCritical
+        expr: porter_stream_lag_messages > 10000
+        for: 2m
+        labels:
+          severity: critical
+          team: porter-platform
+        annotations:
+          summary: "Redis Stream consumer lag above 10,000 — data loss risk"
+          description: >
+            porter_stream_lag_messages is {{ $value }}. At this lag, messages
+            approaching Redis MAXLEN may be evicted. Immediately scale consumers
+            or pause ingest at the source.
+          runbook: "docs/runbooks/queue-lag.md"
+
+  # ── Model drift ─────────────────────────────────────────────────────────────
+  - name: porter.drift
+    rules:
+      - alert: ModelDriftWarning
+        expr: porter_model_drift_psi > 0.1
+        for: 30m
+        labels:
+          severity: warning
+          team: porter-platform
+        annotations:
+          summary: "Model drift PSI above 0.10 — monitor precision"
+          description: >
+            porter_model_drift_psi is {{ $value }}. PSI > 0.10 indicates
+            moderate population shift. Review per-feature drift and schedule
+            a retraining evaluation.
+          runbook: "docs/runbooks/retrain-model.md"
+
+      - alert: ModelDriftCritical
+        expr: porter_model_drift_psi > 0.25
+        for: 15m
+        labels:
+          severity: critical
+          team: porter-platform
+        annotations:
+          summary: "Model drift PSI above 0.25 — retrain required"
+          description: >
+            porter_model_drift_psi is {{ $value }}. PSI > 0.25 indicates
+            significant population shift. Precision and recall are likely
+            degraded. Activate shadow mode and begin retraining.
+          runbook: "docs/runbooks/retrain-model.md"
+
+  # ── False-alarm spike ───────────────────────────────────────────────────────
+  - name: porter.false_alarms
+    rules:
+      - alert: ActionTierFalseAlarmSpike
+        expr: |
+          rate(porter_fraud_cases_created_total{tier="action"}[1h])
+          /
+          rate(porter_trips_scored_total[1h])
+          > 0.05
+        for: 30m
+        labels:
+          severity: warning
+          team: porter-platform
+        annotations:
+          summary: "Action-tier flag rate above 5% — possible false-alarm spike"
+          description: >
+            The ratio of action-tier cases to trips scored is {{ $value | humanizePercentage }}.
+            Training baseline is ~0.53% FPR. A sustained spike suggests either
+            a model degradation event or unusual traffic patterns.
+          runbook: "docs/runbooks/retrain-model.md"
+
+  # ── Infrastructure health (requires blackbox exporter or health-check scraping) ──
+  - name: porter.infra
+    rules:
+      - alert: APIDown
+        expr: up{job="porter-api"} == 0
+        for: 1m
+        labels:
+          severity: critical
+          team: porter-platform
+        annotations:
+          summary: "Porter API is unreachable"
+          description: >
+            Prometheus cannot scrape porter-api:8000/metrics. The container
+            may have crashed or the task has been evicted.
+          runbook: "docs/runbooks/api-restart.md"
+
+      - alert: DatabaseUnavailable
+        expr: |
+          porter_http_request_duration_seconds_count{
+            endpoint="/health", status="200"
+          } == 0
+        for: 2m
+        labels:
+          severity: critical
+          team: porter-platform
+        annotations:
+          summary: "Health endpoint not returning 200 — database likely unavailable"
+          description: >
+            No successful /health 200s in the last 2 minutes. The API is
+            reporting degraded status, most likely a database connectivity issue.
+          runbook: "docs/runbooks/restore-from-backup.md"
+
+      - alert: WebhookDispatchFailing
+        expr: |
+          rate(porter_http_request_duration_seconds_count{
+            endpoint="/webhooks/dispatch/test", status=~"5.."
+          }[10m]) > 0
+        for: 10m
+        labels:
+          severity: warning
+          team: porter-platform
+        annotations:
+          summary: "Enforcement dispatch webhook returning 5xx errors"
+          description: >
+            The downstream dispatch webhook is failing. Fraud flags are being
+            scored and cased but enforcement actions are not being delivered.
+            Check PORTER_DISPATCH_URL and the downstream system.
+          runbook: "docs/runbooks/webhook-failure.md"
