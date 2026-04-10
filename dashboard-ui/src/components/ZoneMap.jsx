@@ -1,6 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { apiGet } from '../utils/api';
-// Leaflet imports
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 
@@ -9,13 +8,16 @@ export default function ZoneMap() {
   const leafletRef  = useRef(null);
   const markersRef  = useRef([]);
   const [mapMode, setMapMode] = useState('fraud');
+  const [error, setError]     = useState(false);
+  const [zoneCount, setZoneCount] = useState(0);
 
   useEffect(() => {
     if (leafletRef.current) return;
 
+    // Start at India level — auto-fit will zoom to data
     leafletRef.current = L.map('porter-map', {
-      center:             [12.9716, 77.5946],
-      zoom:               12,
+      center:             [20.5937, 78.9629],
+      zoom:               5,
       zoomControl:        true,
       attributionControl: false,
     });
@@ -30,17 +32,20 @@ export default function ZoneMap() {
     const fetchHeatmap = async () => {
       try {
         const endpoint = mapMode === 'fraud'
-          ? `/fraud/heatmap`
-          : `/efficiency/dead-miles`;
+          ? '/fraud/heatmap'
+          : '/efficiency/dead-miles';
 
         const data = await apiGet(endpoint);
+        setError(false);
 
         // Clear existing markers
         markersRef.current.forEach(m => m.remove());
         markersRef.current = [];
 
         const map = leafletRef.current;
-        if (!map) return;
+        if (!map || !data.zones?.length) return;
+
+        const bounds = [];
 
         data.zones.forEach(zone => {
           const value = mapMode === 'fraud'
@@ -61,55 +66,40 @@ export default function ZoneMap() {
 
           const circle = L.circle(
             [zone.lat, zone.lon],
-            {
-              radius,
-              color,
-              fillColor:   color,
-              fillOpacity: 0.25,
-              weight:      1.5,
-              opacity:     0.7,
-            }
+            { radius, color, fillColor: color, fillOpacity: 0.25, weight: 1.5, opacity: 0.7 }
           ).addTo(map);
 
           const popupContent = mapMode === 'fraud'
-            ? `Fraud rate: <span style="color: ${color}; font-weight: 700;">
-                ${(zone.fraud_rate * 100).toFixed(1)}%
-              </span><br>
-              Cases: ${zone.fraud_count}<br>
-              Risk: <span style="color: ${color}; font-weight: 700;">
-                ${zone.risk_level}
-              </span>`
-            : `Efficiency: <span style="color: ${color}; font-weight: 700;">
-                ${(value * 100).toFixed(1)}%
-              </span><br>
-              Dead miles: ${((1 - value) * 100).toFixed(1)}%<br>
-              Cost/day: \u20B9${(zone.cost_inr_per_day || 0).toFixed(0)}`;
+            ? `Fraud rate: <span style="color:${color};font-weight:700">${(zone.fraud_rate*100).toFixed(1)}%</span><br>
+               Cases: ${zone.fraud_count}<br>
+               Risk: <span style="color:${color};font-weight:700">${zone.risk_level}</span>`
+            : `Efficiency: <span style="color:${color};font-weight:700">${(value*100).toFixed(1)}%</span><br>
+               Dead miles: ${((1-value)*100).toFixed(1)}%<br>
+               Cost/day: ₹${(zone.cost_inr_per_day||0).toFixed(0)}`;
 
           circle.bindPopup(`
-            <div style="
-              font-family: 'DM Mono', monospace;
-              background: #242438;
-              color: #F0F0FF;
-              border: 1px solid #2E2E4A;
-              border-radius: 8px;
-              padding: 12px;
-              min-width: 160px;
-            ">
-              <div style="
-                font-family: 'Syne', sans-serif;
-                font-weight: 700;
-                font-size: 14px;
-                margin-bottom: 6px;
-              ">${zone.zone_name}</div>
-              <div style="font-size: 11px; color: #8888AA;">
-                ${popupContent}
+            <div style="font-family:'DM Mono',monospace;background:#242438;color:#F0F0FF;
+                        border:1px solid #2E2E4A;border-radius:8px;padding:12px;min-width:160px">
+              <div style="font-family:'Syne',sans-serif;font-weight:700;font-size:14px;margin-bottom:6px">
+                ${zone.zone_name}
               </div>
+              <div style="font-size:11px;color:#8888AA">${popupContent}</div>
             </div>
           `, { className: 'custom-popup' });
 
           markersRef.current.push(circle);
+          bounds.push([zone.lat, zone.lon]);
         });
-      } catch(e) {}
+
+        // Auto-fit map to all zones that have data — shows all cities, not just Bangalore
+        if (bounds.length > 0) {
+          map.fitBounds(L.latLngBounds(bounds), { padding: [40, 40], maxZoom: 12 });
+        }
+
+        setZoneCount(bounds.length);
+      } catch(e) {
+        setError(true);
+      }
     };
 
     if (leafletRef.current) {
@@ -120,26 +110,30 @@ export default function ZoneMap() {
   }, [mapMode]);
 
   const overlayTitle = mapMode === 'fraud'
-    ? 'Bangalore Fraud Zones'
+    ? `Fraud Heatmap${zoneCount > 0 ? ` · ${zoneCount} zones` : ''}`
     : 'Fleet Efficiency Map';
 
   const legendItems = mapMode === 'fraud'
-    ? [
-        ['#EF4444', 'Critical  >12%'],
-        ['#F59E0B', 'High      >8%'],
-        ['#60A5FA', 'Medium    >4%'],
-        ['#22C55E', 'Low       <4%'],
-      ]
-    : [
-        ['#EF4444', 'Poor      <80%'],
-        ['#F59E0B', 'Fair      <90%'],
-        ['#60A5FA', 'Good      <95%'],
-        ['#22C55E', 'Excellent >95%'],
-      ];
+    ? [['#EF4444','Critical >12%'],['#F59E0B','High >8%'],['#60A5FA','Medium >4%'],['#22C55E','Low <4%']]
+    : [['#EF4444','Poor <80%'],['#F59E0B','Fair <90%'],['#60A5FA','Good <95%'],['#22C55E','Excellent >95%']];
 
   return (
     <div style={{ position: 'relative', height: '100%', width: '100%' }}>
       <div id="porter-map" style={{ height: '100%', width: '100%' }} />
+
+      {error && (
+        <div style={{
+          position: 'absolute', top: 8, left: 8, right: 8,
+          background: 'rgba(239,68,68,0.12)',
+          border: '1px solid rgba(239,68,68,0.3)',
+          borderRadius: 6, padding: '8px 12px',
+          fontSize: 11, color: 'var(--danger)',
+          fontFamily: 'var(--font-mono)', zIndex: 1000,
+        }}>
+          Heatmap unavailable — API offline or trip data not loaded
+        </div>
+      )}
+
       <div className="map-overlay">
         <div className="map-overlay-title">{overlayTitle}</div>
         <div className="map-legend">
@@ -150,31 +144,18 @@ export default function ZoneMap() {
             </div>
           ))}
         </div>
-        <div style={{
-          display: 'flex',
-          gap: 4,
-          marginTop: 8,
-        }}>
+        <div style={{ display: 'flex', gap: 4, marginTop: 8 }}>
           {['fraud', 'efficiency'].map(mode => (
             <button key={mode}
               onClick={() => setMapMode(mode)}
               style={{
-                flex: 1,
-                padding: '3px 0',
-                fontSize: 9,
-                fontFamily: 'var(--font-display)',
-                fontWeight: 700,
-                letterSpacing: '0.05em',
-                textTransform: 'uppercase',
-                border: '1px solid',
-                borderRadius: 3,
-                cursor: 'pointer',
-                background: mapMode === mode
-                  ? 'var(--orange)' : 'transparent',
-                color: mapMode === mode
-                  ? 'white' : 'var(--muted)',
-                borderColor: mapMode === mode
-                  ? 'var(--orange)' : 'var(--border)',
+                flex: 1, padding: '3px 0', fontSize: 9,
+                fontFamily: 'var(--font-display)', fontWeight: 700,
+                letterSpacing: '0.05em', textTransform: 'uppercase',
+                border: '1px solid', borderRadius: 3, cursor: 'pointer',
+                background: mapMode === mode ? 'var(--orange)' : 'transparent',
+                color: mapMode === mode ? 'white' : 'var(--muted)',
+                borderColor: mapMode === mode ? 'var(--orange)' : 'var(--border)',
                 transition: 'all 0.15s',
               }}>
               {mode === 'fraud' ? 'Fraud' : 'Fleet'}

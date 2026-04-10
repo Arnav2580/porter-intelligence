@@ -300,27 +300,23 @@ def build_structured_answer(
 def query_llm(
     query: str,
     context: Dict,
-    timeout: int = 30,
+    timeout: int = 5,
 ) -> str:
     """
-    Fall back to Ollama LLM for unrecognised queries.
-    Injects structured context so LLM has real data to work with.
+    Optional Ollama LLM fallback for unrecognised queries.
+
+    Tries Ollama only if OLLAMA_URL is reachable within a short timeout.
+    If Ollama is not running (the common case during demo), returns a
+    structured help message immediately — no 30-second hang.
     """
     context_str = json.dumps(context, indent=2, default=str)
 
-    prompt = f"""You are the operations assistant for Porter Intelligence Platform,
-a logistics fraud detection and leakage-control platform.
-
-Here is the current system data:
-{context_str}
-
-Answer the following question from Porter's operations team.
-Be specific, use the numbers from the context, and be concise.
-Do not make up numbers not in the context.
-
-Question: {query}
-
-Answer:"""
+    prompt = (
+        "You are the operations assistant for Porter Intelligence Platform, "
+        "a logistics fraud detection platform.\n\n"
+        f"System data:\n{context_str}\n\n"
+        f"Question: {query}\n\nAnswer:"
+    )
 
     try:
         response = requests.post(
@@ -329,33 +325,34 @@ Answer:"""
                 "model":  OLLAMA_MODEL,
                 "prompt": prompt,
                 "stream": False,
-                "options": {
-                    "temperature": 0.1,
-                    "num_predict": 300,
-                },
+                "options": {"temperature": 0.1, "num_predict": 300},
             },
-            timeout=timeout,
+            timeout=timeout,  # short timeout — don't block demo
         )
         if response.status_code == 200:
             return response.json().get("response", "").strip()
-        else:
-            return (
-                f"LLM unavailable (status {response.status_code}). "
-                "Run: ollama serve"
-            )
-    except requests.exceptions.ConnectionError:
-        return (
-            "I can answer questions about:\n"
-            "- Fraud rings and organised fraud networks\n"
-            "- Driver risk rankings and profiles\n"
-            "- Zone fraud analysis and hotspots\n"
-            "- KPI summary and evaluation results\n"
-            "- Fraud type breakdown\n"
-            "- How the detection model works\n\n"
-            "Try one of the example queries above."
+    except Exception:
+        pass  # Ollama not running is the expected state in demo
+
+    # Structured fallback — always useful even without Ollama
+    kpi = context.get("kpi_summary", {})
+    eval_data = context.get("evaluation", {})
+    lines = [
+        "**Try one of these data queries:**",
+        "- \"Show me fraud rings in Bangalore\"",
+        "- \"Which drivers have the highest risk?\"",
+        "- \"What zones have the most fraud?\"",
+        "- \"Give me the KPI summary\"",
+        "- \"How does the detection model work?\"",
+    ]
+    if eval_data:
+        lines.append(
+            f"\n**Model benchmarks:** "
+            f"{eval_data.get('action_precision', 0)*100:.1f}% action precision · "
+            f"{eval_data.get('total_fraud_caught_pct', 0):.1f}% fraud caught · "
+            f"₹{eval_data.get('net_recoverable_per_trip', 0):.2f}/trip recovery"
         )
-    except Exception as e:
-        return f"Query error: {str(e)}"
+    return "\n".join(lines)
 
 
 def answer_query(

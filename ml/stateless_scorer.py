@@ -94,21 +94,25 @@ def build_feature_vector(
     # Zone features from Redis
     zone_fraud_7d = float(zone_features.get("zone_fraud_rate_rolling_7d", 0.05))
 
-    # Driver features from Redis — use exact FEATURE_COLUMNS key names
+    # Driver features from Redis — use exact FEATURE_COLUMNS key names.
+    # IMPORTANT: defaults here are the population-median values from training data.
+    # driver_lifetime_trips=0 is the strongest fraud predictor (new/unknown accounts).
+    # When Redis is cold/empty use 500 (median established driver) to avoid every
+    # trip scoring as action-tier before the feature store is warmed up.
     drv_cancel_vel     = float(driver_features.get("driver_cancellation_velocity_1hr",
                               driver_features.get("cancel_rate", 0.0) * 5))
     drv_cancel_7d      = float(driver_features.get("driver_cancel_rate_rolling_7d",
-                              driver_features.get("cancel_rate", 0.0)))
-    drv_dispute_14d    = float(driver_features.get("driver_dispute_rate_rolling_14d", 0.0))
+                              driver_features.get("cancel_rate", 0.05)))
+    drv_dispute_14d    = float(driver_features.get("driver_dispute_rate_rolling_14d", 0.02))
     drv_trips_24h      = float(driver_features.get("driver_trips_last_24hr",
-                              driver_features.get("total_trips", 0)))
+                              driver_features.get("total_trips", 8)))
     drv_cash_ratio_7d  = float(driver_features.get("driver_cash_trip_ratio_7d",
-                              driver_features.get("cash_ratio", 0.5)))
-    drv_acct_age       = float(driver_features.get("driver_account_age_days", 180))
+                              driver_features.get("cash_ratio", 0.25)))
+    drv_acct_age       = float(driver_features.get("driver_account_age_days", 365))
     drv_rating         = float(driver_features.get("driver_rating",
-                              driver_features.get("avg_rating", 4.5)))
+                              driver_features.get("avg_rating", 4.3)))
     drv_lifetime_trips = float(driver_features.get("driver_lifetime_trips",
-                              driver_features.get("total_trips", 0)))
+                              driver_features.get("total_trips", 500)))
 
     # Verification: feature_store stores driver_is_verified (0/1),
     # model expects driver_verification_encoded (0=verified, 1=pending, 2=unverified)
@@ -201,4 +205,6 @@ async def score_trip_stateless(
         "is_fraud_predicted":tier.name in (
             "action", "watchlist"
         ),
+        # Return feature values so callers avoid a second Redis round-trip
+        "feature_vals": dict(zip(feature_names, X.tolist())),
     }

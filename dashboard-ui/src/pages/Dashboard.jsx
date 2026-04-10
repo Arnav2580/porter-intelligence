@@ -138,7 +138,7 @@ export default function Dashboard() {
           <QueryPanel />
           <TripScorer />
         </div>
-        <FraudFeed />
+        <FraudFeed thresholds={healthMeta?.thresholds} />
         <DriverIntelligence />
         <ZoneMap />
       </main>

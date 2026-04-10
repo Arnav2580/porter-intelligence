@@ -8,7 +8,7 @@
 set -euo pipefail
 
 ACCOUNT_ID="${ACCOUNT_ID:?Set ACCOUNT_ID}"
-REGION="${REGION:-ap-southeast-2}"
+REGION="${REGION:-ap-south-1}"
 PROJECT="${PROJECT:-porter}"
 ENV="${ENV:-prod}"
 PREFIX="${PROJECT}-${ENV}"

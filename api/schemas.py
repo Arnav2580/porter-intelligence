@@ -89,8 +89,9 @@ class FraudFeedItem(BaseModel):
 
 
 class LiveFeedResponse(BaseModel):
-    items:       List[FraudFeedItem]
-    total_shown: int
+    items:        List[FraudFeedItem]
+    total_shown:  int
+    is_benchmark: bool = False   # True when serving historical CSV, not live stream
 
 
 class KPISummaryResponse(BaseModel):

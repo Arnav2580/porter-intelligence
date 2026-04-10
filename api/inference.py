@@ -95,13 +95,21 @@ async def fraud_heatmap():
 )
 async def fraud_live_feed(limit: int = 50):
     """
-    Last N fraud-flagged trips for the live activity feed.
-    Sorted by most recent first.
+    Fraud-flagged trip feed.
+
+    When the live simulator is running (ENABLE_SYNTHETIC_FEED=true), items are
+    from the live stream and flagged_at timestamps are current.
+    When the simulator is off, items are drawn from the benchmark CSV and
+    is_benchmark=true is set on the response so the UI can label them correctly.
     """
     trips_df = app_state.get("trips_df", pd.DataFrame())
+    synthetic_feed_enabled = app_state.get("synthetic_feed_enabled", False)
 
     if trips_df.empty:
-        return LiveFeedResponse(items=[], total_shown=0)
+        return LiveFeedResponse(
+            items=[], total_shown=0,
+            is_benchmark=not synthetic_feed_enabled,
+        )
 
     fraud_df = trips_df[trips_df["is_fraud"] == True].copy()
     fraud_df = fraud_df.sort_values(
@@ -126,8 +134,9 @@ async def fraud_live_feed(limit: int = 50):
         ))
 
     return LiveFeedResponse(
-        items       = items,
-        total_shown = len(items),
+        items           = items,
+        total_shown     = len(items),
+        is_benchmark    = not synthetic_feed_enabled,
     )
 
 
@@ -370,6 +379,77 @@ async def kpi_report():
     return _sanitize(report)
 
 
+# Human-readable labels and normalisation ranges for each feature.
+# normalise_max: the value at which a feature is "at maximum concern".
+_SIGNAL_META = {
+    "driver_lifetime_trips":          ("New/unverified driver account",       50,    True),   # low = bad
+    "fare_to_expected_ratio":         ("Fare inflated {v:.2f}×",              3.0,   False),
+    "driver_cancellation_velocity_1hr": ("Cancellations this hour: {v:.0f}", 10.0,  False),
+    "distance_vs_haversine_ratio":    ("Distance inflated {v:.2f}×",          3.0,   False),
+    "driver_cancel_rate_rolling_7d":  ("Cancel rate {v:.0%} (7d)",            0.5,   False),
+    "driver_dispute_rate_rolling_14d":("Dispute rate {v:.0%} (14d)",          0.3,   False),
+    "driver_cash_trip_ratio_7d":      ("Cash ratio {v:.0%} (7d)",             1.0,   False),
+    "zone_fraud_rate_rolling_7d":     ("Zone fraud rate {v:.1%}",             0.20,  False),
+    "payment_is_cash":                ("Cash payment",                        1.0,   False),
+    "is_night":                       ("Night-time trip",                     1.0,   False),
+    "same_zone_trip":                 ("Pickup = dropoff zone",               1.0,   False),
+    "distance_time_ratio":            ("Speed anomaly ({v:.2f} km/min)",       2.0,   False),
+}
+
+
+def _build_top_signals(
+    feature_vals: dict,
+    feature_names: list,
+    model,
+    fraud_prob: float,
+    is_fraud: bool,
+    n: int = 4,
+) -> list:
+    """
+    Return up to *n* human-readable signal strings ranked by
+    (feature_importance × normalised_feature_value).
+
+    This is a lightweight SHAP substitute — no extra dependency,
+    runs in microseconds, and is model-grounded.
+    """
+    importances: dict = {}
+    try:
+        raw = model.feature_importances_
+        importances = {name: float(imp) for name, imp in zip(feature_names, raw)}
+    except Exception:
+        pass  # model may not expose feature_importances_
+
+    scored: list = []
+    for feat, (label_tmpl, norm_max, invert) in _SIGNAL_META.items():
+        val = feature_vals.get(feat, 0.0)
+        if val == 0.0 and not invert:
+            continue  # zero contribution — skip
+
+        # Normalise to [0, 1]
+        if invert:
+            normed = max(0.0, 1.0 - float(val) / max(norm_max, 1.0))
+        else:
+            normed = min(float(val) / max(norm_max, 1.0), 1.0)
+
+        importance = importances.get(feat, 0.01)
+        score = importance * normed
+
+        if score > 0.001:
+            try:
+                label = label_tmpl.format(v=val)
+            except (KeyError, ValueError):
+                label = label_tmpl
+            scored.append((score, label))
+
+    scored.sort(key=lambda x: x[0], reverse=True)
+    signals = [label for _, label in scored[:n]]
+
+    if not signals:
+        signals = [f"Fraud probability: {fraud_prob * 100:.1f}%"]
+
+    return signals
+
+
 @router.post(
     "/fraud/score",
     response_model=TripScoreResponse,
@@ -402,8 +482,7 @@ async def score_trip(request: Request, body: TripScoreRequest):
 
     # Try stateless scoring first (production path)
     try:
-        from ml.stateless_scorer import score_trip_stateless, build_feature_vector
-        from ml.feature_store import get_driver_features, get_zone_features
+        from ml.stateless_scorer import score_trip_stateless
         from model.scoring import get_tier
         
         if model and feature_names:
@@ -415,12 +494,8 @@ async def score_trip(request: Request, body: TripScoreRequest):
             tier          = get_tier(fraud_prob)
             auto_escalate = tier.auto_escalate
             is_fraud      = fraud_prob >= threshold
-            
-            # Reconstruction for signal building
-            drv_feats     = await get_driver_features(trip_dict.get("driver_id", ""))
-            zone_feats    = await get_zone_features(trip_dict.get("pickup_zone_id", ""))
-            X_vec         = build_feature_vector(trip_dict, drv_feats, zone_feats, feature_names)
-            feature_vals  = dict(zip(feature_names, X_vec))
+            # Feature values returned directly — no second Redis round-trip
+            feature_vals  = result.get("feature_vals", {})
             
     except Exception as e:
         logger.warning(
@@ -429,48 +504,53 @@ async def score_trip(request: Request, body: TripScoreRequest):
         )
 
     if fraud_prob is None:
-        # Build a single-row DataFrame matching trip schema
-        trips_df  = pd.DataFrame([trip_dict])
-        trips_df["is_fraud"] = False  # placeholder for feature builder
+        # Pandas fallback — only reached when stateless scorer fails.
+        # Wrapped in a 5s timeout so a stuck compute_trip_features call
+        # doesn't block the request thread indefinitely.
+        import asyncio
 
-        # Add fields that feature engineering expects
-        if "is_cancelled" not in trips_df:
-            trips_df["is_cancelled"] = 0
-        if "customer_complaint_flag" not in trips_df:
-            trips_df["customer_complaint_flag"] = False
-        if "data_split" not in trips_df:
-            trips_df["data_split"] = "historical"
+        def _pandas_score():
+            from model.features import (
+                compute_trip_features,
+                compute_behavioural_sequence_features,
+                FEATURE_COLUMNS,
+                compute_driver_features,
+            )
+            trips_df  = pd.DataFrame([trip_dict])
+            trips_df["is_fraud"] = False
+            if "is_cancelled" not in trips_df:
+                trips_df["is_cancelled"] = 0
+            if "customer_complaint_flag" not in trips_df:
+                trips_df["customer_complaint_flag"] = False
+            if "data_split" not in trips_df:
+                trips_df["data_split"] = "historical"
+            drivers_df = app_state.get("drivers_df", pd.DataFrame())
+            trips_df = compute_trip_features(trips_df)
+            trips_df = compute_driver_features(trips_df, drivers_df)
+            trips_df = compute_behavioural_sequence_features(trips_df)
+            for col in FEATURE_COLUMNS:
+                if col not in trips_df.columns:
+                    trips_df[col] = 0.0
+            X = trips_df[FEATURE_COLUMNS].fillna(0.0).astype(float)
+            return float(model.predict_proba(X)[0, 1]), X.iloc[0].to_dict()
 
-        # Build features
-        from model.features import (
-            compute_trip_features,
-            compute_behavioural_sequence_features,
-            FEATURE_COLUMNS,
-            compute_driver_features,
-        )
-
-        # Load drivers for profile features
-        drivers_df = app_state.get("drivers_df", pd.DataFrame())
-
-        trips_df = compute_trip_features(trips_df)
-        trips_df = compute_driver_features(trips_df, drivers_df)
-        trips_df = compute_behavioural_sequence_features(trips_df)
-
-        for col in FEATURE_COLUMNS:
-            if col not in trips_df.columns:
-                trips_df[col] = 0.0
-
-        X = trips_df[FEATURE_COLUMNS].fillna(0.0).astype(float)
-
-        # Score
-        fraud_prob = float(model.predict_proba(X)[0, 1])
-        is_fraud   = fraud_prob >= threshold
+        try:
+            loop = asyncio.get_event_loop()
+            pandas_result = await asyncio.wait_for(
+                loop.run_in_executor(None, _pandas_score),
+                timeout=5.0,
+            )
+            fraud_prob, _fvals = pandas_result
+            feature_vals = _fvals
+        except asyncio.TimeoutError:
+            logger.error("Pandas fallback timed out after 5s for trip %s", body.trip_id)
+            raise HTTPException(status_code=503, detail="Scoring timed out")
+        is_fraud = fraud_prob >= threshold
 
         # Two-stage tier assignment
         from model.scoring import get_tier
         tier = get_tier(fraud_prob)
         auto_escalate = tier.auto_escalate
-        feature_vals = X.iloc[0]
 
     risk_level = (
         "CRITICAL" if fraud_prob > 0.85 else
@@ -485,34 +565,12 @@ async def score_trip(request: Request, body: TripScoreRequest):
         "low"
     )
 
-    # Top signals (features with high values for this trip)
-    signal_map = {
-        "payment_is_cash":                  "Cash payment detected",
-        "fare_to_expected_ratio":           f"Fare inflated {feature_vals.get('fare_to_expected_ratio', 1):.2f}x",
-        "driver_cancellation_velocity_1hr": f"{feature_vals.get('driver_cancellation_velocity_1hr', 0):.0f} cancellations this hour",
-        "distance_vs_haversine_ratio":      f"Distance inflated {feature_vals.get('distance_vs_haversine_ratio', 1):.2f}x",
-        "is_night":                         "Night trip (higher risk window)",
-        "zone_fraud_rate_rolling_7d":       f"High-risk zone ({feature_vals.get('zone_fraud_rate_rolling_7d', 0)*100:.1f}% fraud rate)",
-    }
-
-    top_signals = []
-    if feature_vals.get("payment_is_cash", 0) == 1:
-        top_signals.append(signal_map["payment_is_cash"])
-    if feature_vals.get("fare_to_expected_ratio", 1) > 1.3:
-        top_signals.append(signal_map["fare_to_expected_ratio"])
-    if feature_vals.get("driver_cancellation_velocity_1hr", 0) >= 2:
-        top_signals.append(signal_map["driver_cancellation_velocity_1hr"])
-    if feature_vals.get("distance_vs_haversine_ratio", 1) > 1.5:
-        top_signals.append(signal_map["distance_vs_haversine_ratio"])
-    if feature_vals.get("is_night", 0) == 1 and is_fraud:
-        top_signals.append(signal_map["is_night"])
-    if feature_vals.get("zone_fraud_rate_rolling_7d", 0) > 0.06:
-        top_signals.append(signal_map["zone_fraud_rate_rolling_7d"])
-
-    if not top_signals:
-        top_signals = [
-            f"Fraud probability: {fraud_prob*100:.1f}%",
-        ]
+    # Top signals — ranked by (feature_importance × normalised_value)
+    # Uses XGBoost's own feature_importances_ so signals reflect what
+    # the model actually weighted, not hardcoded rule thresholds.
+    top_signals = _build_top_signals(
+        feature_vals, feature_names, model, fraud_prob, is_fraud
+    )
 
     # Persist to database if action or watchlist
     if tier.name in ("action", "watchlist"):

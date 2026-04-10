@@ -1,0 +1,39 @@
+# docker-compose.demo.yml — Demo mode override
+#
+# Usage:
+#   docker compose -f docker-compose.yml -f docker-compose.demo.yml up
+#
+# Overrides vs production:
+#   APP_RUNTIME_MODE=demo      — enables synthetic data paths
+#   ENABLE_SYNTHETIC_FEED=true — starts live simulator on boot
+#   SHADOW_MODE=true           — no real enforcement webhooks fired
+#   ALLOW_PLAINTEXT_PII=true   — driver IDs shown in clear text for demos
+#   Safe demo secrets used     — no external .env required
+#   Data+weights mounted RO    — prevents accidental writes during demo
+
+version: "3.9"
+
+services:
+  api:
+    environment:
+      APP_ENV: demo
+      APP_RUNTIME_MODE: demo
+      ENABLE_SYNTHETIC_FEED: "true"
+      SHADOW_MODE: "true"
+      ALLOW_PLAINTEXT_PII: "true"
+      LOG_LEVEL: warning
+
+      # Demo-safe secrets — override these for any real environment
+      JWT_SECRET_KEY: demo-jwt-secret-not-for-production
+      ENCRYPTION_KEY: demo-encryption-key-32bytes-padded
+      WEBHOOK_SECRET: demo-webhook-secret
+      API_ALLOWED_ORIGINS: "http://localhost:3000,http://localhost:5173"
+      PORTER_AUTH_ADMIN_PASSWORD: demo-admin
+      PORTER_AUTH_OPS_MANAGER_PASSWORD: demo-ops
+      PORTER_AUTH_ANALYST_PASSWORD: demo-analyst
+      PORTER_AUTH_VIEWER_PASSWORD: demo-viewer
+
+    volumes:
+      # Read-only in demo — no accidental writes during presentation
+      - ./data:/app/data:ro
+      - ./model/weights:/app/model/weights:ro

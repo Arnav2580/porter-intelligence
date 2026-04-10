@@ -9,3 +9,19 @@ __pycache__
 remember.md
 review_report.md
 .DS_Store
+
+# Large data files — never bake into the image (188MB+ of CSVs)
+data/
+model/weights/
+_archive/
+
+# Internal docs
+"founders work"/
+"how it works"/
+docs/
+
+# Dev tooling
+node_modules/
+dashboard-ui/node_modules/
+dashboard-ui/dist/
+*.log

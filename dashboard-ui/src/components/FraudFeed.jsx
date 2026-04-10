@@ -23,19 +23,32 @@ const ZONE_LABELS = {
   blr_bannerghatta:    'Bannerghatta',
   blr_yeshwanthpur:    'Yeshwanthpur',
   blr_rajajinagar:     'Rajajinagar',
+  mum_andheri:         'Andheri',
+  mum_bandra:          'Bandra',
+  del_cp:              'Connaught Pl.',
+  del_gurgaon:         'Gurgaon',
 };
 
-export default function FraudFeed() {
-  const [items, setItems]   = useState([]);
-  const [total, setTotal]   = useState(0);
+export default function FraudFeed({ thresholds }) {
+  const [items, setItems]             = useState([]);
+  const [isBenchmark, setIsBenchmark] = useState(true);
+  const [error, setError]             = useState(false);
   const listRef = useRef(null);
+
+  // Read tier thresholds from props (passed from health endpoint) or fall back to
+  // config defaults. Never hardcode thresholds in the frontend.
+  const actionThreshold    = thresholds?.action_threshold    ?? 0.94;
+  const watchlistThreshold = thresholds?.watchlist_threshold ?? 0.45;
 
   const fetchFeed = useCallback(async () => {
     try {
       const data = await apiGet('/fraud/live-feed?limit=40');
       setItems(data.items || []);
-      setTotal(data.total_shown || 0);
-    } catch(e) {}
+      setIsBenchmark(data.is_benchmark !== false);
+      setError(false);
+    } catch(e) {
+      setError(true);
+    }
   }, []);
 
   useEffect(() => {
@@ -44,45 +57,58 @@ export default function FraudFeed() {
     return () => clearInterval(t);
   }, [fetchFeed]);
 
-  const riskOf = (confidence) =>
-    confidence > 0.85 ? 'CRITICAL' :
-    confidence > 0.75 ? 'HIGH' :
-    confidence > 0.65 ? 'MEDIUM' : 'LOW';
-
   const tierOf = (confidence) =>
-    confidence >= 0.94 ? 'action' :
-    confidence >= 0.45 ? 'watchlist' : 'clear';
+    confidence >= actionThreshold    ? 'action' :
+    confidence >= watchlistThreshold ? 'watchlist' : 'clear';
 
   const tierLabel = (t) =>
     t === 'action' ? 'ACTION' :
     t === 'watchlist' ? 'WATCH' : 'CLEAR';
+
+  const feedLabel     = isBenchmark ? 'BENCHMARK DATA' : 'LIVE';
+  const feedLabelColor = isBenchmark ? 'var(--warning)' : 'var(--success)';
+  const feedSubLabel  = isBenchmark
+    ? '100k-trip evaluation set · start simulator for live feed'
+    : `Refreshes every 10s · Showing ${items.length} cases`;
 
   return (
     <div className="col feed-col" style={{ padding: 0 }}>
       <div className="feed-header">
         <div>
           <div style={{ fontFamily: 'var(--font-display)', fontWeight: 700, fontSize: 14 }}>
-            Live Fraud Feed
+            Fraud Activity Feed
           </div>
-          <div className="feed-count">
-            Refreshes every 10s &middot; Showing {items.length} cases
+          <div className="feed-count" style={{ color: isBenchmark ? 'var(--warning)' : 'var(--muted)' }}>
+            {feedSubLabel}
           </div>
         </div>
-        <div className="live-badge">
-          <div className="live-dot"></div>
-          LIVE
+        <div className="live-badge" style={{ color: feedLabelColor }}>
+          <div className="live-dot" style={{
+            background: feedLabelColor,
+            animation: isBenchmark ? 'none' : 'pulse-dot 2s infinite',
+          }} />
+          {feedLabel}
         </div>
       </div>
 
       <div className="feed-list" ref={listRef}>
-        {items.length === 0 && (
+        {error && (
+          <div style={{
+            margin: 12, padding: '10px 12px',
+            background: 'rgba(239,68,68,0.08)',
+            border: '1px solid rgba(239,68,68,0.2)',
+            borderRadius: 6, fontSize: 11, color: 'var(--danger)',
+          }}>
+            Feed unavailable — check API health
+          </div>
+        )}
+        {!error && items.length === 0 && (
           <div className="loading">
-            <div className="spinner"></div>
+            <div className="spinner" />
             Loading fraud cases...
           </div>
         )}
         {items.map((item, i) => {
-          const risk = riskOf(item.confidence);
           const tier = tierOf(item.confidence);
           return (
             <div key={item.trip_id + i} className="feed-item">

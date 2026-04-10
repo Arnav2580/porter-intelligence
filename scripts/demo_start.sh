@@ -83,7 +83,11 @@ SHADOW=$(printf "%s" "${HEALTH_JSON}" | python3 -c "import json,sys;d=json.load(
 [[ "${REDIS_OK}" == "ok" ]]        && ok "redis ok"           || bad "redis: ${REDIS_OK}"
 [[ "${SHADOW}" == "False" ]]       && ok "shadow_mode: OFF"   || say "shadow_mode: ON (will suppress enforcement)"
 
-# ── 6. Frontend dev server ────────────────────────────────────────────────────
+# ── 6. Pre-seed demo database with reviewed cases ─────────────────────────────
+say "Seeding demo database (idempotent)"
+"${VENV_DIR}/bin/python" scripts/seed_demo_db.py || bad "DB seed failed (KPI panel may show zero metrics)"
+
+# ── 8. Frontend dev server ────────────────────────────────────────────────────
 if pgrep -f "vite.*--port ${UI_PORT}" >/dev/null 2>&1 || pgrep -f "dashboard-ui.*vite" >/dev/null 2>&1; then
   ok "UI dev server already running on :${UI_PORT}"
 else
@@ -98,7 +102,7 @@ else
   bad "UI not reachable yet — check ${UI_LOG}"
 fi
 
-# ── 7. Final readiness summary ────────────────────────────────────────────────
+# ── 9. Final readiness summary ────────────────────────────────────────────────
 cat <<EOF
 
 ──────────────────────────────────────────────────────────

@@ -23,10 +23,11 @@ router = APIRouter(prefix="/demo", tags=["demo"])
 _DEMO_SCENARIOS = [
     {
         "id": "ring_walkthrough",
-        "label": "Fraud Ring Walkthrough",
+        "label": "Ghost Trip — Cancelled with Fare",
         "story": (
-            "Short-hop, late-night cash pattern shaped to trigger the "
-            "action tier and open the analyst workflow with collusion-like signals."
+            "Trip claimed as completed in 2.5 minutes for 2.8 km — "
+            "physically impossible in Bangalore traffic. Cash, late-night, "
+            "high surge. Model catches the impossible physics + payment pattern."
         ),
         "form_patch": {
             "payment_mode": "cash",
@@ -46,10 +47,11 @@ _DEMO_SCENARIOS = [
     },
     {
         "id": "cash_extortion",
-        "label": "Cash Extortion Case",
+        "label": "Cash Extortion — Inflated Fare",
         "story": (
-            "Inflated cash fare on a short urban route. Use this to tell the "
-            "pricing-abuse and recoverable-value story quickly."
+            "Mini-truck, 4.1 km, fare claimed at ₹1,250 — 4.6× the expected "
+            "₹274 for that route. Cash payment, night, high surge. "
+            "Fare inflation + payment mode = strong action signal."
         ),
         "form_patch": {
             "payment_mode": "cash",
@@ -69,10 +71,11 @@ _DEMO_SCENARIOS = [
     },
     {
         "id": "gps_spoofing",
-        "label": "GPS Spoofing Style Case",
+        "label": "GPS Spoof — Distance vs Route Mismatch",
         "story": (
-            "Mismatched distance-duration-fare pattern useful for showing how "
-            "the model reacts to implausible trip physics."
+            "Declared 1.4 km but actual Hebbal→Yeshwanthpur route is 3.8 km — "
+            "driver declared a fraction of the true distance while charging "
+            "full fare. Distance-vs-haversine ratio is the key signal here."
         ),
         "form_patch": {
             "payment_mode": "upi",
@@ -88,6 +91,30 @@ _DEMO_SCENARIOS = [
             "day_of_week": 2,
             "is_peak_hour": False,
             "zone_demand_at_time": 0.95,
+        },
+    },
+    {
+        "id": "clean_trip",
+        "label": "Clean Trip — Legitimate Delivery",
+        "story": (
+            "Standard two-wheeler UPI delivery, daytime, normal speed, "
+            "fare within expected range. Model scores CLEAR — "
+            "shows analysts what a legitimate trip looks like."
+        ),
+        "form_patch": {
+            "payment_mode": "upi",
+            "vehicle_type": "two_wheeler",
+            "pickup_zone_id": "blr_indiranagar",
+            "dropoff_zone_id": "blr_koramangala",
+            "declared_distance_km": 6.0,
+            "declared_duration_min": 24.0,
+            "fare_inr": 82,
+            "surge_multiplier": 1.0,
+            "is_night": False,
+            "hour_of_day": 10,
+            "day_of_week": 1,
+            "is_peak_hour": False,
+            "zone_demand_at_time": 0.9,
         },
     },
 ]
