@@ -95,7 +95,7 @@ data/raw/evaluation_report.json
 
 # ── Internal docs (handover terms, demo scripts, security runbooks) ───────────
 docs/handover/
-docs/demo/
+docs/demo/fail-safe-demo.md
 docs/security/
 docs/runbooks/rotate-secrets.md
 docs/runbooks/restore-from-backup.md

@@ -187,7 +187,7 @@ export default function TripScorer() {
             ))}
           </select>
         </div>
-        <div className="form-group">
+        <div className="form-group full">
           <div className="form-label">Pickup Zone</div>
           <select className="form-select"
             value={form.pickup_zone_id}
@@ -197,7 +197,7 @@ export default function TripScorer() {
             ))}
           </select>
         </div>
-        <div className="form-group">
+        <div className="form-group full">
           <div className="form-label">Dropoff Zone</div>
           <select className="form-select"
             value={form.dropoff_zone_id}
