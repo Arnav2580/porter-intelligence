@@ -81,20 +81,15 @@ infrastructure/aws/state/
 # ── Archive (local only — internal/sales docs, never public) ─────────────────
 _archive/
 
-# ── Trained model weights (core IP — local only) ─────────────────────────────
-model/weights/*.pkl
-model/weights/*.json
+# ── Transferable model artifacts and sample data ─────────────────────────────
+# Model weights and sample data are tracked intentionally
+# as part of the transferable asset package.
+# See docs/handover/
+model/weights/demand_models_meta.json
 model/weights/*.ubj
-# model/weights/README.md is intentionally kept
 
-# ── Raw and synthetic datasets (regenerate locally, never public) ─────────────
+# ── Raw and synthetic datasets (large/full exports stay local) ───────────────
 data/raw/customers_sample_1000.csv
-data/raw/drivers_sample_1000.csv
-data/raw/trips_with_fraud_10k.csv
-data/raw/evaluation_report.json
-
-# ── Internal docs (handover terms, demo scripts, security runbooks) ───────────
-docs/handover/
 docs/demo/fail-safe-demo.md
 docs/security/
 docs/runbooks/rotate-secrets.md
