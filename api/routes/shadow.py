@@ -21,22 +21,36 @@ async def shadow_status(db: AsyncSession = Depends(get_db)):
     target = get_case_storage_target()
     cutoff_24h = datetime.now(timezone.utc) - timedelta(hours=24)
 
-    total_shadow_cases = await db.scalar(
-        select(func.count(ShadowCase.id))
-    ) or 0
-    shadow_cases_24h = await db.scalar(
-        select(func.count(ShadowCase.id)).where(
-            ShadowCase.created_at >= cutoff_24h
-        )
-    ) or 0
-    action_cases_24h = await db.scalar(
-        select(func.count(ShadowCase.id)).where(
-            and_(
-                ShadowCase.created_at >= cutoff_24h,
-                ShadowCase.tier == "action",
+    try:
+        total_shadow_cases = await db.scalar(
+            select(func.count(ShadowCase.id))
+        ) or 0
+        shadow_cases_24h = await db.scalar(
+            select(func.count(ShadowCase.id)).where(
+                ShadowCase.created_at >= cutoff_24h
             )
-        )
-    ) or 0
+        ) or 0
+        action_cases_24h = await db.scalar(
+            select(func.count(ShadowCase.id)).where(
+                and_(
+                    ShadowCase.created_at >= cutoff_24h,
+                    ShadowCase.tier == "action",
+                )
+            )
+        ) or 0
+    except Exception:
+        return {
+            "shadow_mode": runtime.shadow_mode,
+            "runtime_mode": runtime.mode.value,
+            "case_write_target": "unavailable",
+            "operational_writeback_enabled": False,
+            "enforcement_enabled": False,
+            "shadow_cases_total": 0,
+            "shadow_cases_24h": 0,
+            "action_shadow_cases_24h": 0,
+            "status": "infrastructure_unavailable",
+            "note": "Database unreachable — shadow-mode case counts unavailable.",
+        }
 
     return {
         "shadow_mode": runtime.shadow_mode,

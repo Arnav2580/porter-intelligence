@@ -71,26 +71,32 @@ _DEMO_SCENARIOS = [
     },
     {
         "id": "gps_spoofing",
-        "label": "GPS Spoof — Distance vs Route Mismatch",
+        "label": "GPS Spoof — Inflated Route Distance",
         "story": (
-            "Declared 1.4 km but actual Hebbal→Yeshwanthpur route is 3.8 km — "
-            "driver declared a fraction of the true distance while charging "
-            "full fare. Distance-vs-haversine ratio is the key signal here."
+            "Driver claims 17 km for a Hebbal→Yeshwanthpur trip — "
+            "straight-line haversine is 4.9 km, road distance ~6 km. "
+            "Declared distance is 2.8× the haversine, triggering the "
+            "Distance-vs-Haversine ratio signal. Cash payment adds "
+            "a second corroborating signal."
         ),
         "form_patch": {
-            "payment_mode": "upi",
-            "vehicle_type": "two_wheeler",
+            "payment_mode": "cash",
+            "vehicle_type": "auto",
             "pickup_zone_id": "blr_hebbal",
             "dropoff_zone_id": "blr_yeshwanthpur",
-            "declared_distance_km": 1.4,
-            "declared_duration_min": 18.0,
-            "fare_inr": 640,
-            "surge_multiplier": 1.1,
+            "pickup_lat": 13.0358,
+            "pickup_lon": 77.5970,
+            "dropoff_lat": 13.0210,
+            "dropoff_lon": 77.5540,
+            "declared_distance_km": 17.0,
+            "declared_duration_min": 35.0,
+            "fare_inr": 480,
+            "surge_multiplier": 1.0,
             "is_night": False,
-            "hour_of_day": 14,
-            "day_of_week": 2,
+            "hour_of_day": 11,
+            "day_of_week": 1,
             "is_peak_hour": False,
-            "zone_demand_at_time": 0.95,
+            "zone_demand_at_time": 0.85,
         },
     },
     {

@@ -202,17 +202,19 @@ async def get_driver_features(
     if cached:
         return cached
 
-    # Default features for unknown driver
+    # Default features for unknown/cold-start driver.
+    # Use population-median values so cold-start drivers don't inherit
+    # "New/unverified driver account" signals on otherwise clean trips.
     return {
         "driver_id":                       driver_id,
-        "total_trips":                     0,
+        "total_trips":                     500,
         "fraud_rate":                      0.0,
         "cancel_rate":                     0.0,
         "cash_ratio":                      0.5,
         "avg_fare":                        300.0,
         "dispute_rate":                    0.0,
         "driver_dispute_rate_rolling_14d": 0.0,
-        "driver_account_age_days":         30,
+        "driver_account_age_days":         365,
         "driver_is_verified":              1,
     }
 

@@ -382,7 +382,105 @@ def generate_reallocation_suggestions(
         key=lambda x: x["expected_revenue_inr"],
         reverse=True
     )
+
+    # ── Fallback: generate from dead-mile data when optimizer finds nothing ──
+    if not suggestions and dead_mile_data:
+        _suggestions_from_dead_miles(
+            dead_mile_data, suggestions, max_suggestions
+        )
+
     return suggestions[:max_suggestions]
+
+
+def _suggestions_from_dead_miles(
+    dead_mile_data: Dict,
+    suggestions: List[Dict],
+    max_suggestions: int,
+) -> None:
+    """
+    Fallback suggestion generator using dead-mile rates.
+
+    When the utilisation optimizer finds no idle/demand pairs
+    (e.g., off-peak hours or sparse data), generate suggestions
+    based on zones with the highest dead-mile rates. High dead-mile
+    zones have excess supply and are natural sources for reallocation.
+
+    Adds suggestions in-place to the provided list.
+    """
+    from generator.cities import haversine_km, ZONES
+
+    # Rank zones by dead mile rate descending
+    ranked = sorted(
+        (
+            (zid, z)
+            for zid, z in dead_mile_data.items()
+            if isinstance(z, dict) and z.get("dead_mile_rate", 0) > 0.05
+        ),
+        key=lambda x: x[1].get("dead_mile_rate", 0),
+        reverse=True,
+    )
+
+    seen: set = set()
+    for from_zid, from_data in ranked[:6]:
+        from_zone = ZONES.get(from_zid)
+        if from_zone is None:
+            continue
+
+        dead_rate = float(from_data.get("dead_mile_rate", 0.0))
+        # Find the nearest zone with lower dead-mile rate as destination
+        for to_zid, to_data in sorted(
+            dead_mile_data.items(),
+            key=lambda x: x[1].get("dead_mile_rate", 0),
+        ):
+            if to_zid == from_zid:
+                continue
+            to_zone = ZONES.get(to_zid)
+            if to_zone is None:
+                continue
+            pair_key = f"{from_zid}→{to_zid}"
+            if pair_key in seen:
+                continue
+
+            dist = haversine_km(
+                from_zone.lat, from_zone.lon,
+                to_zone.lat,   to_zone.lon,
+            )
+            if dist > 12.0:
+                continue
+
+            idle_count = max(1, int(dead_rate * 10))
+            avg_revenue = 250.0  # ₹ per trip — conservative estimate
+            expected_trips = idle_count * 2
+            expected_revenue = expected_trips * avg_revenue
+
+            seen.add(pair_key)
+            suggestions.append({
+                "suggestion_id": (
+                    f"REALLOC_{from_zid[:6].upper()}"
+                    f"_{to_zid[:6].upper()}_DM"
+                ),
+                "from_zone_id":   from_zid,
+                "from_zone_name": from_zone.name,
+                "to_zone_id":     to_zid,
+                "to_zone_name":   to_zone.name,
+                "vehicle_type":   "two_wheeler",
+                "idle_count":     idle_count,
+                "to_demand_mult": 1.0,
+                "distance_km":    round(dist, 1),
+                "urgency":        "MEDIUM",
+                "expected_trips": expected_trips,
+                "expected_revenue_inr": round(expected_revenue, 2),
+                "reason": (
+                    f"{from_zone.name} has {dead_rate:.0%} dead-mile rate "
+                    f"— {idle_count} vehicle(s) repositionable to "
+                    f"{to_zone.name} ({dist:.1f} km). "
+                    f"Est. ₹{expected_revenue:,.0f} incremental revenue."
+                ),
+                "generated_at": datetime.now().isoformat(),
+            })
+
+            if len(suggestions) >= max_suggestions:
+                return
 
 
 # ── Fleet summary ─────────────────────────────────────────────

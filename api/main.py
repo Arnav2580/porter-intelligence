@@ -261,6 +261,14 @@ async def health():
             {},
         ).get("warnings", []),
         "threshold":    app_state.get("threshold", 0.45),
+        "thresholds": {
+            "watchlist_threshold": (
+                app_state.get("two_stage_config") or {}
+            ).get("watchlist_threshold", 0.45),
+            "action_threshold": (
+                app_state.get("two_stage_config") or {}
+            ).get("action_threshold", 0.94),
+        },
         "simulator_summary": app_state.get(
             "simulator_summary"
         ),

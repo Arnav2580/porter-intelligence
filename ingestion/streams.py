@@ -97,8 +97,16 @@ async def consume_loop() -> None:
             logger.info("Stream consumer shutting down cleanly")
             break
         except Exception as e:
-            logger.error(f"Stream consumer loop error: {e}")
-            await asyncio.sleep(5)
+            _consume_failures = getattr(consume_loop, "_consecutive_failures", 0) + 1
+            consume_loop._consecutive_failures = _consume_failures
+            if _consume_failures == 1 or _consume_failures % 10 == 0:
+                logger.error(f"Stream consumer loop error: {e}")
+            backoff = min(5 * (2 ** (_consume_failures - 1)), 60)
+            try:
+                await asyncio.sleep(backoff)
+            except asyncio.CancelledError:
+                logger.info("Stream consumer shutting down cleanly")
+                break
 
 
 async def _score_and_persist(trip: Dict, msg_id: str) -> None:

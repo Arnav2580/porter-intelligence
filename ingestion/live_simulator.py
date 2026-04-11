@@ -535,16 +535,36 @@ async def run_live_simulator() -> None:
         format_simulator_summary(),
     )
 
+    consecutive_failures = 0
+    _last_error_msg: str = ""
+
     while True:
         settings = get_simulator_settings()
         try:
             trip = generate_live_trip(settings=settings)
             await publish_trip(trip)
+            if consecutive_failures > 0:
+                logger.info("Live simulator recovered after %d failures", consecutive_failures)
+            consecutive_failures = 0
+            _last_error_msg = ""
         except asyncio.CancelledError:
             logger.info("Live simulator shutting down cleanly")
             break
         except Exception as exc:
-            logger.warning("Live simulator publish error: %s", exc)
+            consecutive_failures += 1
+            error_msg = str(exc)
+            # Only log first occurrence and every 10th repeat to suppress spam
+            if error_msg != _last_error_msg or consecutive_failures % 10 == 1:
+                logger.warning("Live simulator publish error: %s", exc)
+                _last_error_msg = error_msg
+            # Exponential backoff: 2s, 4s, 8s … capped at 60s
+            backoff = min(settings.interval_seconds * (2 ** (consecutive_failures - 1)), 60.0)
+            try:
+                await asyncio.sleep(backoff)
+            except asyncio.CancelledError:
+                logger.info("Live simulator shutting down cleanly")
+                break
+            continue
 
         try:
             await asyncio.sleep(settings.interval_seconds)

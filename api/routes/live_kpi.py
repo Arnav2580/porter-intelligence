@@ -83,6 +83,49 @@ def get_review_confidence(reviewed_cases: int) -> dict[str, str]:
     }
 
 
+def _infra_unavailable_fallback(now: datetime) -> dict:
+    """Return a safe KPI stub when Postgres is unreachable."""
+    runtime_mode = app_state.get("runtime_mode", "prod")
+    return {
+        "window": "last_24h",
+        "generated_at": now.isoformat(),
+        "runtime_mode": runtime_mode,
+        "synthetic_feed_enabled": app_state.get("synthetic_feed_enabled", False),
+        "shadow_mode": app_state.get("shadow_mode", False),
+        "data_provenance": "Infrastructure unavailable — KPI metrics are temporarily offline.",
+        "metric_status": "infrastructure_unavailable",
+        "review_basis": "Database unreachable.",
+        "review_confidence_status": "infrastructure_unavailable",
+        "review_confidence_label": "Infrastructure Unavailable",
+        "review_confidence_note": (
+            "KPI metrics require a PostgreSQL connection. "
+            "Check database connectivity and retry."
+        ),
+        "metric_notes": {},
+        "reviewed_cases_24h": 0,
+        "confirmed_fraud_24h": 0,
+        "false_alarm_reviews_24h": 0,
+        "reviewed_case_precision": 0.0,
+        "reviewed_case_precision_pct": 0.0,
+        "reviewed_false_alarm_rate": 0.0,
+        "reviewed_false_alarm_rate_pct": 0.0,
+        "confirmed_recoverable_inr_24h": 0.0,
+        "pending_review_cases": 0,
+        "action_tier_24h": 0,
+        "watchlist_tier_24h": 0,
+        "total_flagged_24h": 0,
+        "action_score_avg": 0.0,
+        "action_score_avg_pct": 0.0,
+        "false_alarm_share": 0.0,
+        "false_alarm_share_pct": 0.0,
+        "estimated_recoverable_inr": 0.0,
+        "estimated_recoverable_per_trip": 0.0,
+        "indicative_annual_recovery_crore": 0.0,
+        "all_time_cases": 0,
+        "cases_today": 0,
+    }
+
+
 @router.get("/kpi/live")
 async def kpi_live(db: AsyncSession = Depends(get_db)):
     """
@@ -114,123 +157,127 @@ async def kpi_live(db: AsyncSession = Depends(get_db)):
     )
     shadow_mode = app_state.get("shadow_mode", False)
 
-    # ── 24h case counts by tier ───────────────────────────────────
-    action_24h = await db.scalar(
-        select(func.count(FraudCase.id)).where(
-            and_(
-                FraudCase.tier == "action",
-                FraudCase.created_at >= cutoff_24h,
+    try:
+        # ── 24h case counts by tier ───────────────────────────────────
+        action_24h = await db.scalar(
+            select(func.count(FraudCase.id)).where(
+                and_(
+                    FraudCase.tier == "action",
+                    FraudCase.created_at >= cutoff_24h,
+                )
+            )
+        ) or 0
+
+        watchlist_24h = await db.scalar(
+            select(func.count(FraudCase.id)).where(
+                and_(
+                    FraudCase.tier == "watchlist",
+                    FraudCase.created_at >= cutoff_24h,
+                )
+            )
+        ) or 0
+
+        # ── Reviewed-case metrics: defensible for fraud / finance review ───────
+        confirmed_fraud_24h = await db.scalar(
+            select(func.count(FraudCase.id)).where(
+                and_(
+                    FraudCase.status == FraudCaseStatus.CONFIRMED,
+                    FraudCase.resolved_at >= cutoff_24h,
+                )
+            )
+        ) or 0
+
+        false_alarm_reviews_24h = await db.scalar(
+            select(func.count(FraudCase.id)).where(
+                and_(
+                    FraudCase.status == FraudCaseStatus.FALSE_ALARM,
+                    FraudCase.resolved_at >= cutoff_24h,
+                )
+            )
+        ) or 0
+
+        reviewed_cases_24h = (
+            confirmed_fraud_24h + false_alarm_reviews_24h
+        )
+        reviewed_case_precision = _safe_ratio(
+            confirmed_fraud_24h,
+            reviewed_cases_24h,
+        )
+        reviewed_false_alarm_rate = _safe_ratio(
+            false_alarm_reviews_24h,
+            reviewed_cases_24h,
+        )
+        review_confidence = get_review_confidence(reviewed_cases_24h)
+
+        confirmed_rec = await db.scalar(
+            select(func.sum(FraudCase.recoverable_inr)).where(
+                and_(
+                    FraudCase.status == FraudCaseStatus.CONFIRMED,
+                    FraudCase.resolved_at >= cutoff_24h,
+                )
             )
         )
-    ) or 0
+        confirmed_recoverable_inr_24h = (
+            float(confirmed_rec) if confirmed_rec is not None else 0.0
+        )
 
-    watchlist_24h = await db.scalar(
-        select(func.count(FraudCase.id)).where(
-            and_(
-                FraudCase.tier == "watchlist",
-                FraudCase.created_at >= cutoff_24h,
+        pending_review_cases = await db.scalar(
+            select(func.count(FraudCase.id)).where(
+                FraudCase.status.in_(_PENDING_STATUSES)
+            )
+        ) or 0
+
+        # ── Operational proxy metrics: useful, but not final truth ─────────────
+        avg_prob = await db.scalar(
+            select(func.avg(FraudCase.fraud_probability)).where(
+                and_(
+                    FraudCase.tier == "action",
+                    FraudCase.created_at >= cutoff_24h,
+                )
             )
         )
-    ) or 0
+        action_score_avg = float(avg_prob) if avg_prob is not None else 0.0
 
-    # ── Reviewed-case metrics: defensible for fraud / finance review ───────
-    confirmed_fraud_24h = await db.scalar(
-        select(func.count(FraudCase.id)).where(
-            and_(
-                FraudCase.status == FraudCaseStatus.CONFIRMED,
-                FraudCase.resolved_at >= cutoff_24h,
+        total_flagged_24h = action_24h + watchlist_24h
+        false_alarm_share = _safe_ratio(
+            false_alarm_reviews_24h,
+            total_flagged_24h,
+        )
+
+        # ── Estimated recoverable — action tier only ────────────────────────────
+        net_rec = await db.scalar(
+            select(func.sum(FraudCase.recoverable_inr)).where(
+                and_(
+                    FraudCase.tier == "action",
+                    FraudCase.created_at >= cutoff_24h,
+                )
             )
         )
-    ) or 0
+        estimated_recoverable_inr = (
+            float(net_rec) if net_rec is not None else 0.0
+        )
 
-    false_alarm_reviews_24h = await db.scalar(
-        select(func.count(FraudCase.id)).where(
-            and_(
-                FraudCase.status == FraudCaseStatus.FALSE_ALARM,
-                FraudCase.resolved_at >= cutoff_24h,
+        # ── Per-trip and annual figures ───────────────────────────────
+        estimated_recoverable_per_trip = (
+            estimated_recoverable_inr / _TRIPS_PER_DAY
+        )
+        indicative_annual_recovery_crore = (
+            estimated_recoverable_inr * 365
+        ) / 10_000_000
+
+        # ── All-time totals ───────────────────────────────────────────
+        all_time_cases = await db.scalar(
+            select(func.count(FraudCase.id))
+        ) or 0
+
+        cases_today = await db.scalar(
+            select(func.count(FraudCase.id)).where(
+                FraudCase.created_at >= today_start
             )
-        )
-    ) or 0
+        ) or 0
 
-    reviewed_cases_24h = (
-        confirmed_fraud_24h + false_alarm_reviews_24h
-    )
-    reviewed_case_precision = _safe_ratio(
-        confirmed_fraud_24h,
-        reviewed_cases_24h,
-    )
-    reviewed_false_alarm_rate = _safe_ratio(
-        false_alarm_reviews_24h,
-        reviewed_cases_24h,
-    )
-    review_confidence = get_review_confidence(reviewed_cases_24h)
-
-    confirmed_rec = await db.scalar(
-        select(func.sum(FraudCase.recoverable_inr)).where(
-            and_(
-                FraudCase.status == FraudCaseStatus.CONFIRMED,
-                FraudCase.resolved_at >= cutoff_24h,
-            )
-        )
-    )
-    confirmed_recoverable_inr_24h = (
-        float(confirmed_rec) if confirmed_rec is not None else 0.0
-    )
-
-    pending_review_cases = await db.scalar(
-        select(func.count(FraudCase.id)).where(
-            FraudCase.status.in_(_PENDING_STATUSES)
-        )
-    ) or 0
-
-    # ── Operational proxy metrics: useful, but not final truth ─────────────
-    avg_prob = await db.scalar(
-        select(func.avg(FraudCase.fraud_probability)).where(
-            and_(
-                FraudCase.tier == "action",
-                FraudCase.created_at >= cutoff_24h,
-            )
-        )
-    )
-    action_score_avg = float(avg_prob) if avg_prob is not None else 0.0
-
-    total_flagged_24h = action_24h + watchlist_24h
-    false_alarm_share = _safe_ratio(
-        false_alarm_reviews_24h,
-        total_flagged_24h,
-    )
-
-    # ── Estimated recoverable — action tier only ────────────────────────────
-    net_rec = await db.scalar(
-        select(func.sum(FraudCase.recoverable_inr)).where(
-            and_(
-                FraudCase.tier == "action",
-                FraudCase.created_at >= cutoff_24h,
-            )
-        )
-    )
-    estimated_recoverable_inr = (
-        float(net_rec) if net_rec is not None else 0.0
-    )
-
-    # ── Per-trip and annual figures ───────────────────────────────
-    estimated_recoverable_per_trip = (
-        estimated_recoverable_inr / _TRIPS_PER_DAY
-    )
-    indicative_annual_recovery_crore = (
-        estimated_recoverable_inr * 365
-    ) / 10_000_000
-
-    # ── All-time totals ───────────────────────────────────────────
-    all_time_cases = await db.scalar(
-        select(func.count(FraudCase.id))
-    ) or 0
-
-    cases_today = await db.scalar(
-        select(func.count(FraudCase.id)).where(
-            FraudCase.created_at >= today_start
-        )
-    ) or 0
+    except Exception:
+        return _infra_unavailable_fallback(now)
 
     metric_status = (
         "reviewed_case_metrics_primary"
