@@ -130,9 +130,50 @@ def build_structured_answer(
         )
         return "\n".join(lines)
 
+    # ── Zone analysis query ─────────────────────────────────
+    # Check zone before driver — "highest", "worst" map to zones UNLESS the
+    # query explicitly mentions drivers (e.g. "drivers with highest risk").
+    _zone_words   = {"zone", "area", "location", "koramangala",
+                     "whitefield", "indiranagar", "where"}
+    _zone_trigger = _zone_words | {"highest", "worst"}
+    _driver_words = {"driver", "drivers"}
+    _is_zone_query = (
+        any(w in q for w in _zone_trigger)
+        and not any(w in q for w in _driver_words)
+    ) or any(w in q for w in _zone_words)
+    if _is_zone_query:
+        if trips_df is None or len(trips_df) == 0:
+            return "No trip data available."
+
+        from generator.cities import ZONES
+        zone_stats = (
+            trips_df.groupby("pickup_zone_id")
+            .agg(
+                total_trips = ("trip_id", "count"),
+                fraud_trips = ("is_fraud", "sum"),
+                recoverable = ("recoverable_amount_inr", "sum"),
+            )
+            .assign(
+                fraud_rate = lambda d: d["fraud_trips"]
+                                       / d["total_trips"],
+            )
+            .nlargest(5, "fraud_rate")
+            .reset_index()
+        )
+
+        lines = ["**Top 5 zones by fraud rate:**\n"]
+        for _, r in zone_stats.iterrows():
+            zone = ZONES.get(r["pickup_zone_id"])
+            name = zone.name if zone else r["pickup_zone_id"]
+            lines.append(
+                f"- {name}: {r['fraud_rate']*100:.1f}% fraud rate "
+                f"({r['fraud_trips']:.0f} cases) "
+                f"| Rs.{r['recoverable']:,.0f} recoverable"
+            )
+        return "\n".join(lines)
+
     # ── High-risk drivers query ───────────────────────────
-    if any(w in q for w in ["driver", "drivers", "risk",
-                              "highest", "worst", "flag"]):
+    if any(w in q for w in ["driver", "drivers", "risk", "flag"]):
         if trips_df is None or len(trips_df) == 0:
             return "No trip data available."
 
@@ -173,40 +214,6 @@ def build_structured_answer(
         lines.append(
             "\n-> Recommendation: Flag top 3 for immediate review."
         )
-        return "\n".join(lines)
-
-    # ── Zone analysis query ───────────────────────────────
-    if any(w in q for w in ["zone", "area", "location",
-                              "koramangala", "whitefield",
-                              "indiranagar", "where"]):
-        if trips_df is None or len(trips_df) == 0:
-            return "No trip data available."
-
-        from generator.cities import ZONES
-        zone_stats = (
-            trips_df.groupby("pickup_zone_id")
-            .agg(
-                total_trips = ("trip_id", "count"),
-                fraud_trips = ("is_fraud", "sum"),
-                recoverable = ("recoverable_amount_inr", "sum"),
-            )
-            .assign(
-                fraud_rate = lambda d: d["fraud_trips"]
-                                       / d["total_trips"],
-            )
-            .nlargest(5, "fraud_rate")
-            .reset_index()
-        )
-
-        lines = ["**Top 5 zones by fraud rate:**\n"]
-        for _, r in zone_stats.iterrows():
-            zone = ZONES.get(r["pickup_zone_id"])
-            name = zone.name if zone else r["pickup_zone_id"]
-            lines.append(
-                f"- {name}: {r['fraud_rate']*100:.1f}% fraud rate "
-                f"({r['fraud_trips']:.0f} cases) "
-                f"| Rs.{r['recoverable']:,.0f} recoverable"
-            )
         return "\n".join(lines)
 
     # ── KPI summary query ─────────────────────────────────

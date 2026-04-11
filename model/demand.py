@@ -254,10 +254,10 @@ def forecast_zone(
     result["yhat_upper"]        = result["yhat_upper"].clip(lower=0).round(1)
     result["demand_multiplier"] = (result["yhat"] / base_rate).round(3)
     result["surge_expected"]    = result["demand_multiplier"] > 1.8
-    result["confidence_pct"]    = (
+    result["confidence_pct"] = (
         (result["yhat_upper"] - result["yhat_lower"])
         / result["yhat"].clip(lower=1) * 100
-    ).round(1)
+    ).round(1).clip(upper=100)
 
     return result.reset_index(drop=True)
 

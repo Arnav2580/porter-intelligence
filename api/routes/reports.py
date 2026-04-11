@@ -459,35 +459,47 @@ async def board_pack(
     user=Depends(require_permission("read:reports")),
 ):
     """Download the current buyer board pack as a PDF."""
-    since = datetime.utcnow() - timedelta(days=30)
+    import logging
+    _logger = logging.getLogger(__name__)
 
-    total_cases = await db.scalar(
-        select(func.count(FraudCase.id)).where(FraudCase.created_at >= since)
-    ) or 0
-    confirmed = await db.scalar(
-        select(func.count(FraudCase.id)).where(
-            and_(
-                FraudCase.created_at >= since,
-                FraudCase.status == FraudCaseStatus.CONFIRMED,
+    since = datetime.utcnow() - timedelta(days=30)
+    data_source = "live_database"
+
+    try:
+        total_cases = await db.scalar(
+            select(func.count(FraudCase.id)).where(FraudCase.created_at >= since)
+        ) or 0
+        confirmed = await db.scalar(
+            select(func.count(FraudCase.id)).where(
+                and_(
+                    FraudCase.created_at >= since,
+                    FraudCase.status == FraudCaseStatus.CONFIRMED,
+                )
             )
-        )
-    ) or 0
-    false_alarms = await db.scalar(
-        select(func.count(FraudCase.id)).where(
-            and_(
-                FraudCase.created_at >= since,
-                FraudCase.status == FraudCaseStatus.FALSE_ALARM,
+        ) or 0
+        false_alarms = await db.scalar(
+            select(func.count(FraudCase.id)).where(
+                and_(
+                    FraudCase.created_at >= since,
+                    FraudCase.status == FraudCaseStatus.FALSE_ALARM,
+                )
             )
-        )
-    ) or 0
-    recovered = await db.scalar(
-        select(func.sum(FraudCase.recoverable_inr)).where(
-            and_(
-                FraudCase.created_at >= since,
-                FraudCase.status == FraudCaseStatus.CONFIRMED,
+        ) or 0
+        recovered = await db.scalar(
+            select(func.sum(FraudCase.recoverable_inr)).where(
+                and_(
+                    FraudCase.created_at >= since,
+                    FraudCase.status == FraudCaseStatus.CONFIRMED,
+                )
             )
-        )
-    ) or 0.0
+        ) or 0.0
+    except Exception as exc:
+        _logger.warning("DB unavailable for board pack: %s — using benchmark fallback", exc)
+        total_cases  = 0
+        confirmed    = 0
+        false_alarms = 0
+        recovered    = 0.0
+        data_source  = "benchmark_fallback"
 
     reviewed_cases = confirmed + false_alarms
     benchmark = _load_benchmark_report()

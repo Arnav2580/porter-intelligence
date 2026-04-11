@@ -52,6 +52,7 @@ class TripScoreResponse(BaseModel):
     # Ops team instruction
     action_required:    str
     auto_escalate:      bool  # watchlist auto-escalation flag
+    escalation_note:    Optional[str] = None  # guidance when manual review needed
 
     # Explanation
     top_signals:        List[str]

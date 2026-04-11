@@ -117,29 +117,52 @@ async def get_queue_status_summary(
     if auto_drain and redis_available:
         drain_result = await drain_staged_trips(limit=100)
 
-    async with AsyncSessionLocal() as db:
-        counts_result = await db.execute(
-            select(
-                IngestionStagingRecord.status,
-                func.count(IngestionStagingRecord.id),
-            ).group_by(IngestionStagingRecord.status)
-        )
-        counts = {
-            status.value if status else "unknown": count
-            for status, count in counts_result.all()
-        }
-        oldest_pending = await db.scalar(
-            select(func.min(IngestionStagingRecord.created_at)).where(
-                IngestionStagingRecord.status.in_(
-                    (
-                        IngestionStagingStatus.PENDING,
-                        IngestionStagingStatus.FAILED,
+    try:
+        async with AsyncSessionLocal() as db:
+            counts_result = await db.execute(
+                select(
+                    IngestionStagingRecord.status,
+                    func.count(IngestionStagingRecord.id),
+                ).group_by(IngestionStagingRecord.status)
+            )
+            counts = {
+                status.value if status else "unknown": count
+                for status, count in counts_result.all()
+            }
+            oldest_pending = await db.scalar(
+                select(func.min(IngestionStagingRecord.created_at)).where(
+                    IngestionStagingRecord.status.in_(
+                        (
+                            IngestionStagingStatus.PENDING,
+                            IngestionStagingStatus.FAILED,
+                        )
                     )
                 )
             )
+    except Exception as exc:
+        import logging
+        logging.getLogger(__name__).warning(
+            "DB unavailable for ingest/status: %s", exc
         )
+        return {
+            "status":             "degraded",
+            "database":           "unavailable",
+            "redis_available":    redis_available,
+            "redis_stream_lag":   0,
+            "staging_queue_size": 0,
+            "pending_rows":       0,
+            "failed_rows":        0,
+            "queued_rows":        0,
+            "oldest_pending_at":  None,
+            "auto_drain_result":  drain_result,
+            "message": (
+                "Pipeline monitoring requires database connectivity. "
+                "Redis-side drain is still operational."
+            ),
+        }
 
     return {
+        "status":          "ok",
         "redis_available": redis_available,
         "counts": counts,
         "pending_rows": counts.get("pending", 0),

@@ -54,7 +54,7 @@ TIERS = {
         name            = "watchlist",
         label           = "WATCHLIST",
         threshold_low   = 0.45,
-        threshold_high  = 0.88,
+        threshold_high  = 0.94,
         color           = "#F59E0B",   # amber
         action          = "Monitor. Escalates to ACTION "
                           "if driver appears 3+ times in 24hrs.",

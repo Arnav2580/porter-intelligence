@@ -260,7 +260,6 @@ async def health():
             "security_validation",
             {},
         ).get("warnings", []),
-        "threshold":    app_state.get("threshold", 0.45),
         "thresholds": {
             "watchlist_threshold": (
                 app_state.get("two_stage_config") or {}

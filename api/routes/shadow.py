@@ -6,6 +6,7 @@ from fastapi import APIRouter, Depends
 from sqlalchemy import and_, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from auth.dependencies import get_current_user
 from database.case_store import get_case_storage_target, should_enforce_actions
 from database.connection import get_db
 from database.models import ShadowCase
@@ -15,7 +16,10 @@ router = APIRouter(prefix="/shadow", tags=["shadow"])
 
 
 @router.get("/status")
-async def shadow_status(db: AsyncSession = Depends(get_db)):
+async def shadow_status(
+    db: AsyncSession = Depends(get_db),
+    current_user: dict = Depends(get_current_user),
+):
     """Expose shadow-mode safety state for buyer-facing demos."""
     runtime = get_runtime_settings()
     target = get_case_storage_target()
