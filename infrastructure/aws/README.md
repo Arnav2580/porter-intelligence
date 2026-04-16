@@ -84,6 +84,69 @@ ACCOUNT_ID=<aws-account-id> REGION=ap-southeast-2 \
 - otherwise perform a rolling update
 - reconcile the ECS service network configuration with the current state file
 
+## Pausing to Stop Costs
+
+If you are between demos or iterating locally, run the pause script to stop all
+billable resources without destroying configuration or data:
+
+```bash
+ACCOUNT_ID=767678952517 REGION=ap-southeast-2 \
+  bash infrastructure/aws/pause.sh
+```
+
+What it stops and estimated monthly savings:
+
+| Action | Saves |
+|---|---|
+| ECS desired_count → 0 | ~$42/month |
+| RDS instance stopped | ~$13/month |
+| ElastiCache deleted | ~$13/month |
+| ALB + target group deleted | ~$18/month |
+| **Total** | **~$86/month** |
+
+> **Note:** AWS auto-restarts stopped RDS instances after 7 days. For
+> a permanent stop, use `teardown.sh` instead.
+
+To resume after a pause:
+
+```bash
+ACCOUNT_ID=767678952517 REGION=ap-southeast-2 \
+  bash infrastructure/aws/setup.sh
+ACCOUNT_ID=767678952517 REGION=ap-southeast-2 \
+  bash infrastructure/aws/deploy.sh
+```
+
+## Running Demo Without AWS (Free)
+
+The platform runs fully in benchmark mode with no cloud services needed.
+`docker compose up` is sufficient for a sales demo:
+
+```bash
+docker compose up          # postgres + redis + api + prometheus, all local
+# API available at http://localhost:8000
+# All 14 endpoints return 200 with benchmark data
+```
+
+Set `ENABLE_SYNTHETIC_FEED=true` in `.env` for a live-updating fraud feed.
+
+## Full Teardown
+
+When you no longer need the AWS environment at all:
+
+```bash
+ACCOUNT_ID=767678952517 REGION=ap-southeast-2 \
+  bash infrastructure/aws/teardown.sh
+```
+
+This deletes all resources in dependency order (ECS → ALB → ElastiCache →
+RDS → VPC). It takes a final RDS snapshot by default. Pass `--no-snapshot`
+to skip it:
+
+```bash
+NO_SNAPSHOT=true ACCOUNT_ID=767678952517 REGION=ap-southeast-2 \
+  bash infrastructure/aws/teardown.sh
+```
+
 ## Frontend Hosting
 
 The dashboard is intentionally decoupled from raw ALB hostnames.
