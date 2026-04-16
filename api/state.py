@@ -7,6 +7,7 @@ Extracted from api/main.py to keep the entry point lean.
 
 import asyncio
 import json
+import logging
 import os
 import numpy as np
 import pandas as pd
@@ -24,6 +25,7 @@ from security.settings import validate_security_configuration
 
 # -- Global state (loaded at startup) --
 app_state: Dict = {}
+logger = logging.getLogger(__name__)
 
 
 def console_log(msg: str):
@@ -328,8 +330,8 @@ async def lifespan(app):
             "threshold":       str(app_state.get("threshold", 0.45)),
             "feature_count":   str(len(app_state.get("feature_names", []))),
         })
-    except Exception:
-        pass
+    except Exception as exc:
+        logger.debug("Model metadata metrics skipped: %s", exc)
 
     console_log("Porter Intelligence Platform ready")
 

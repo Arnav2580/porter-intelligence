@@ -139,8 +139,8 @@ async def _score_and_persist(trip: Dict, msg_id: str) -> None:
     try:
         from monitoring.metrics import TRIPS_SCORED
         TRIPS_SCORED.labels(tier=tier.name, path="stream").inc()
-    except Exception:
-        pass
+    except Exception as exc:
+        logger.debug("Stream Prometheus counter skipped: %s", exc)
 
     if tier.name in ("action", "watchlist"):
         await persist_flagged_case(
@@ -176,6 +176,6 @@ async def get_stream_lag() -> int:
                     group.get("pel-count")
                     or group.get(b"pel-count", 0)
                 )
-    except Exception:
-        pass
+    except Exception as exc:
+        logger.debug("Stream lag lookup skipped: %s", exc)
     return 0

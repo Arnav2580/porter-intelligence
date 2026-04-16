@@ -85,6 +85,18 @@ function truncate(str, length) {
   return str.length > length ? `${str.slice(0, length)}...` : str;
 }
 
+function signalLabel(signal) {
+  if (!signal) return '--';
+  if (typeof signal === 'string') return signal;
+  return signal.name || signal.detail || '--';
+}
+
+function signalDetail(signal) {
+  if (!signal) return '--';
+  if (typeof signal === 'string') return signal;
+  return signal.detail || signal.name || '--';
+}
+
 function probColor(probability) {
   if (probability > 0.94) return 'var(--danger)';
   if (probability > 0.45) return 'var(--warning)';
@@ -143,8 +155,8 @@ function Header({
           <div className="header-logo-mark">P</div>
         </Link>
         <div>
-          <div className="header-title">Porter Intelligence</div>
-          <div className="header-subtitle">Analyst Workstation</div>
+          <div className="header-title">Trip Intelligence</div>
+          <div className="header-subtitle">Trip Intelligence &middot; Analyst Workspace</div>
         </div>
       </div>
 
@@ -243,8 +255,10 @@ function CaseCard({
         </div>
         {signals.length > 0 ? (
           <div className="signal-chip-row">
-            {signals.slice(0, 3).map((signal) => (
-              <span key={signal} className="signal-chip">{signal}</span>
+            {signals.slice(0, 3).map((signal, index) => (
+              <span key={`${signalLabel(signal)}-${index}`} className="signal-chip">
+                {signalLabel(signal)}
+              </span>
             ))}
           </div>
         ) : null}
@@ -475,6 +489,16 @@ function CaseQueue({ onSelectCase }) {
             <span>R</span> Refresh
           </button>
         </div>
+      </div>
+
+      <div style={{
+        fontSize: 12,
+        color: 'var(--muted)',
+        padding: '8px 0',
+        borderBottom: '1px solid var(--border)',
+        marginBottom: 16,
+      }}>
+        Cases below are trip-level anomalies flagged by behavioral scoring. Device-level identity controls are handled upstream. These cases require trip-evidence review before enforcement action.
       </div>
 
       <div className="queue-metrics-grid">
@@ -872,15 +896,22 @@ function CaseDetail({ selectedCase, onBack, onOpenDriver, onOpenCase }) {
             <div className="signal-list">
               {(caseData.top_signals || []).length > 0 ? (
                 caseData.top_signals.slice(0, 5).map((signal, index) => (
-                  <div key={signal} className="explanation-row">
+                  <div key={`${signalLabel(signal)}-${index}`} className="explanation-row">
                     <div className="explanation-copy">
                       <span className="signal-arrow">-&gt;</span>
-                      <span>{signal}</span>
+                      <span>{signalDetail(signal)}</span>
                     </div>
                     <div className="explanation-bar">
                       <div
                         className="explanation-bar-fill"
-                        style={{ width: `${scoreWeight(index) * 100}%` }}
+                        style={{
+                          width: `${
+                            (typeof signal === 'object' && signal?.normed != null
+                              ? Number(signal.normed)
+                              : scoreWeight(index)
+                            ) * 100
+                          }%`,
+                        }}
                       />
                     </div>
                   </div>

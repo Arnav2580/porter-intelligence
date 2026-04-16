@@ -55,7 +55,10 @@ class TripScoreResponse(BaseModel):
     escalation_note:    Optional[str] = None  # guidance when manual review needed
 
     # Explanation
-    top_signals:        List[str]
+    top_signals:        List[Dict[str, Union[str, float]]]
+    narrative:          str
+    intelligence_layer: str
+    complementary_layer: str
     confidence:         str   # "high" / "medium" / "low"
     scored_at:          str
 

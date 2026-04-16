@@ -6,6 +6,7 @@ All ML endpoints live in api/inference.py.
 All startup state lives in api/state.py.
 """
 
+import logging
 import os
 import time
 from pathlib import Path
@@ -29,6 +30,8 @@ from database.connection import AsyncSessionLocal
 from database.redis_client import ping_redis
 from runtime_config import describe_data_provenance
 from security.settings import get_allowed_origins
+
+logger = logging.getLogger(__name__)
 
 app = FastAPI(
     title=API_TITLE,
@@ -126,8 +129,8 @@ class PrometheusMiddleware(BaseHTTPMiddleware):
                 endpoint = request.url.path,
                 status   = str(response.status_code),
             ).observe(duration)
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.debug("Prometheus latency metric skipped: %s", exc)
         return response
 
 
@@ -233,8 +236,8 @@ async def health():
         async with AsyncSessionLocal() as db:
             await db.execute(select(1))
         db_ok = True
-    except Exception:
-        pass
+    except Exception as exc:
+        logger.debug("Health-check DB probe failed: %s", exc)
 
     redis_ok = await ping_redis()
 

@@ -43,7 +43,7 @@ async def persist_flagged_case(
     zone_id: str,
     tier: str,
     fraud_probability: float,
-    top_signals: list[str] | None,
+    top_signals: list[dict | str] | None,
     fare_inr: float,
     recoverable_inr: float,
     auto_escalated: bool,

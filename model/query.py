@@ -16,6 +16,7 @@ Falls back to Ollama LLM for unrecognised queries.
 """
 
 import json
+import logging
 import re
 import requests
 from typing import Dict, Optional
@@ -25,6 +26,7 @@ from rich.console import Console
 from generator.config import DATA_RAW, MODEL_WEIGHTS, HISTORICAL_DAYS
 
 console = Console()
+logger = logging.getLogger(__name__)
 
 OLLAMA_URL = "http://localhost:11434/api/generate"
 OLLAMA_MODEL = "llama3"
@@ -338,8 +340,8 @@ def query_llm(
         )
         if response.status_code == 200:
             return response.json().get("response", "").strip()
-    except Exception:
-        pass  # Ollama not running is the expected state in demo
+    except Exception as exc:
+        logger.debug("Ollama query fallback activated: %s", exc)
 
     # Structured fallback — always useful even without Ollama
     kpi = context.get("kpi_summary", {})

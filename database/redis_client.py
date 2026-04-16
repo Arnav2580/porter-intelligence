@@ -1,6 +1,7 @@
 """Redis client for hot cache access."""
 
 import json
+import logging
 import os
 from typing import Any, Optional
 
@@ -9,6 +10,7 @@ import redis.asyncio as aioredis
 REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:6379")
 
 _client = None
+logger = logging.getLogger(__name__)
 
 
 def get_redis():
@@ -33,8 +35,8 @@ async def cache_set(
             ttl_seconds,
             json.dumps(value),
         )
-    except Exception:
-        pass
+    except Exception as exc:
+        logger.debug("Redis cache_set skipped for %s: %s", key, exc)
 
 
 async def cache_get(key: str) -> Optional[Any]:
@@ -48,8 +50,8 @@ async def cache_get(key: str) -> Optional[Any]:
 async def cache_delete(key: str) -> None:
     try:
         await get_redis().delete(key)
-    except Exception:
-        pass
+    except Exception as exc:
+        logger.debug("Redis cache_delete skipped for %s: %s", key, exc)
 
 
 async def ping_redis() -> bool:

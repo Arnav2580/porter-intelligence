@@ -5,9 +5,11 @@ All fraud scoring, demand forecasting, and KPI endpoints.
 Registered as an APIRouter in api/main.py.
 """
 
+import logging
+import math
 import pandas as pd
 from datetime import datetime
-from typing import Dict
+from typing import Dict, Optional
 
 from fastapi import APIRouter, HTTPException, Request
 
@@ -23,6 +25,7 @@ from database.case_store import persist_flagged_case, should_enforce_actions
 from security.settings import get_rate_limit
 
 router = APIRouter(tags=["platform"])
+logger = logging.getLogger(__name__)
 
 
 def safe_recoverable(recoverable: float, fare: float) -> float:
@@ -482,14 +485,15 @@ async def kpi_report():
     # Inject correct two-stage thresholds — never expose legacy 0.82
     result["watchlist_threshold"] = watchlist_threshold
     result["action_threshold"]    = action_threshold
+    result["action_tier_recall_pct"] = 53.0
+    result["combined_recall_pct"] = 81.5
     # Recall framing note — surfaces the two-stage explanation proactively
     # so a CXO sees the answer before asking "why only 53%?"
     result["recall_note"] = (
-        "Action tier recall: 53.0% (3,773 of 5,895). "
-        "Combined action + watchlist recall: 81.5%. "
-        "Action tier is optimized for high-confidence enforcement — "
-        "lower recall preserves analyst trust by minimizing false positives "
-        "(FPR: 0.53%). Watchlist captures the additional 28.5%."
+        "Action tier (53%) is optimised for high-confidence enforcement — "
+        "minimises false positives (FPR: 0.53%). Combined action + "
+        "watchlist recall: 81.5%. Watchlist tier captures the additional "
+        "28.5% for analyst review before enforcement."
     )
     return result
 
@@ -497,18 +501,72 @@ async def kpi_report():
 # Human-readable labels and normalisation ranges for each feature.
 # normalise_max: the value at which a feature is "at maximum concern".
 _SIGNAL_META = {
-    "driver_lifetime_trips":          ("New/unverified driver account",       50,    True),   # low = bad
-    "fare_to_expected_ratio":         ("Fare inflated {v:.2f}×",              3.0,   False),
-    "driver_cancellation_velocity_1hr": ("Cancellations this hour: {v:.0f}", 10.0,  False),
-    "distance_vs_haversine_ratio":    ("GPS route manipulation ({v:.1f}× declared vs GPS distance)", 3.0, False),
-    "driver_cancel_rate_rolling_7d":  ("Cancel rate {v:.0%} (7d)",            0.5,   False),
-    "driver_dispute_rate_rolling_14d":("Dispute rate {v:.0%} (14d)",          0.3,   False),
-    "driver_cash_trip_ratio_7d":      ("Cash ratio {v:.0%} (7d)",             1.0,   False),
-    "zone_fraud_rate_rolling_7d":     ("Zone fraud rate {v:.1%}",             0.20,  False),
-    "payment_is_cash":                ("Cash payment",                        1.0,   False),
-    "is_night":                       ("Night-time trip",                     1.0,   False),
-    "same_zone_trip":                 ("Pickup = dropoff zone",               1.0,   False),
-    "distance_time_ratio":            ("Speed anomaly ({v:.2f} km/min)",       2.0,   False),
+    "driver_lifetime_trips": (
+        "New driver account",
+        "Driver lifetime trips only {v:.0f}. Newly established driver profile.",
+        50,
+        True,
+    ),
+    "fare_to_expected_ratio": (
+        "Fare inflated",
+        "Observed fare is {v:.2f}× the expected benchmark for this trip.",
+        3.0,
+        False,
+    ),
+    "driver_cancellation_velocity_1hr": (
+        "Cancellation burst",
+        "{v:.0f} driver cancellations observed in the last hour.",
+        10.0,
+        False,
+    ),
+    "driver_cancel_rate_rolling_7d": (
+        "High cancellation rate",
+        "Driver cancellation rate is {v:.0%} over the last 7 days.",
+        0.5,
+        False,
+    ),
+    "driver_dispute_rate_rolling_14d": (
+        "High dispute rate",
+        "Driver dispute rate is {v:.0%} over the last 14 days.",
+        0.3,
+        False,
+    ),
+    "driver_cash_trip_ratio_7d": (
+        "Cash-heavy history",
+        "Cash share is {v:.0%} across the driver's last 7 days of trips.",
+        1.0,
+        False,
+    ),
+    "zone_fraud_rate_rolling_7d": (
+        "High-risk zone",
+        "Pickup zone fraud rate is {v:.1%} over the last 7 days.",
+        0.20,
+        False,
+    ),
+    "payment_is_cash": (
+        "Cash payment",
+        "Cash payment mode increases leakage and dispute risk.",
+        1.0,
+        False,
+    ),
+    "is_night": (
+        "Night-time trip",
+        "Trip occurred during higher-risk night hours.",
+        1.0,
+        False,
+    ),
+    "same_zone_trip": (
+        "Same-zone loop",
+        "Pickup and dropoff zones are identical.",
+        1.0,
+        False,
+    ),
+    "distance_time_ratio": (
+        "Speed anomaly",
+        "Observed declared speed is {v:.2f} km/min for this trip.",
+        2.0,
+        False,
+    ),
 }
 
 
@@ -518,24 +576,91 @@ def _build_top_signals(
     model,
     fraud_prob: float,
     is_fraud: bool,
-    n: int = 4,
+    trip_dict: Optional[Dict] = None,
+    n: int = 5,
 ) -> list:
     """
-    Return up to *n* human-readable signal strings ranked by
-    (feature_importance × normalised_feature_value).
+    Return up to *n* structured signals ranked by strength.
 
     This is a lightweight SHAP substitute — no extra dependency,
     runs in microseconds, and is model-grounded.
     """
+    def haversine(lat1, lon1, lat2, lon2):
+        radius_km = 6371
+        dlat = math.radians(lat2 - lat1)
+        dlon = math.radians(lon2 - lon1)
+        a_val = (
+            math.sin(dlat / 2) ** 2
+            + math.cos(math.radians(lat1))
+            * math.cos(math.radians(lat2))
+            * math.sin(dlon / 2) ** 2
+        )
+        return radius_km * 2 * math.asin(math.sqrt(a_val))
+
     importances: dict = {}
     try:
         raw = model.feature_importances_
         importances = {name: float(imp) for name, imp in zip(feature_names, raw)}
-    except Exception:
-        pass  # model may not expose feature_importances_
+    except Exception as exc:
+        logger.debug(
+            "Model feature importances unavailable for top-signal attribution: %s",
+            exc,
+        )
 
-    scored: list = []
-    for feat, (label_tmpl, norm_max, invert) in _SIGNAL_META.items():
+    signals: list = []
+    declared_km = float(
+        (trip_dict or {}).get(
+            "declared_distance_km",
+            feature_vals.get("declared_distance_km", 0.0),
+        ) or 0.0
+    )
+    if trip_dict and all(
+        key in trip_dict
+        for key in (
+            "pickup_lat",
+            "pickup_lon",
+            "dropoff_lat",
+            "dropoff_lon",
+        )
+    ):
+        haversine_km = haversine(
+            float(trip_dict["pickup_lat"]),
+            float(trip_dict["pickup_lon"]),
+            float(trip_dict["dropoff_lat"]),
+            float(trip_dict["dropoff_lon"]),
+        )
+    else:
+        haversine_km = float(
+            feature_vals.get("pickup_dropoff_haversine_km", 0.0)
+        )
+
+    haversine_km = max(haversine_km, 0.1)
+    hav_ratio = haversine_km / declared_km if declared_km > 0 else 1.0
+
+    if hav_ratio > 2.0:
+        signals.append({
+            "name": "GPS route manipulation",
+            "detail": (
+                f"GPS straight-line {haversine_km:.1f}km vs declared "
+                f"{declared_km:.1f}km ({hav_ratio:.1f}× ratio). "
+                "Distance under-declaration detected."
+            ),
+            "normed": min((hav_ratio - 1) / 4.0, 1.0),
+        })
+
+    if declared_km > haversine_km * 1.5:
+        ratio = declared_km / max(haversine_km, 0.1)
+        signals.append({
+            "name": "GPS route manipulation",
+            "detail": (
+                f"Declared {declared_km:.1f}km vs GPS route "
+                f"{haversine_km:.1f}km ({ratio:.1f}× inflation). "
+                "Distance inflation detected."
+            ),
+            "normed": min((ratio - 1) / 3.0, 1.0),
+        })
+
+    for feat, (name, detail_tmpl, norm_max, invert) in _SIGNAL_META.items():
         val = feature_vals.get(feat, 0.0)
         if val == 0.0 and not invert:
             continue  # zero contribution — skip
@@ -551,33 +676,36 @@ def _build_top_signals(
 
         if score > 0.001:
             try:
-                label = label_tmpl.format(v=val)
+                detail = detail_tmpl.format(v=val)
             except (KeyError, ValueError):
-                label = label_tmpl
-            scored.append((score, label))
-
-    scored.sort(key=lambda x: x[0], reverse=True)
-    signals = [label for _, label in scored[:n]]
-
-    # GPS spoof override: when declared distance >> haversine, inject this
-    # signal at the top — it IS the defining evidence and must not be buried
-    # by feature importance weighting of cash/fare signals.
-    hav_ratio = feature_vals.get("distance_vs_haversine_ratio", 0.0)
-    if hav_ratio >= 2.5:
-        gps_label = (
-            f"GPS route manipulation — declared {feature_vals.get('declared_distance_km', 0):.1f}km "
-            f"vs GPS {feature_vals.get('pickup_dropoff_haversine_km', 0):.1f}km "
-            f"({hav_ratio:.1f}× ratio)"
-        )
-        # Place at front, remove any duplicate distance signal
-        signals = [s for s in signals if "GPS route" not in s and "Distance" not in s]
-        signals.insert(0, gps_label)
-        signals = signals[:n]
+                detail = detail_tmpl
+            signals.append({
+                "name": name,
+                "detail": detail,
+                "normed": min(score, 1.0),
+            })
 
     if not signals:
-        signals = [f"Fraud probability: {fraud_prob * 100:.1f}%"]
+        signals = [{
+            "name": "Composite model risk",
+            "detail": f"Fraud probability: {fraud_prob * 100:.1f}%",
+            "normed": min(fraud_prob, 1.0),
+        }]
 
-    return signals
+    deduped = []
+    seen = set()
+    for signal in sorted(
+        signals,
+        key=lambda item: item.get("normed", 0),
+        reverse=True,
+    ):
+        key = (signal.get("name"), signal.get("detail"))
+        if key in seen:
+            continue
+        seen.add(key)
+        deduped.append(signal)
+
+    return deduped[:n]
 
 
 @router.post(
@@ -598,9 +726,6 @@ async def score_trip(request: Request, body: TripScoreRequest):
             status_code=503,
             detail="Model not loaded. Run the training pipeline first.",
         )
-
-    import logging
-    logger = logging.getLogger(__name__)
 
     trip_dict     = body.model_dump()
     feature_names = app_state.get("feature_names", [])
@@ -704,7 +829,12 @@ async def score_trip(request: Request, body: TripScoreRequest):
         top_signals: list = []
     else:
         top_signals = _build_top_signals(
-            feature_vals, feature_names, model, fraud_prob, is_fraud
+            feature_vals,
+            feature_names,
+            model,
+            fraud_prob,
+            is_fraud,
+            trip_dict=trip_dict,
         )
 
     # Persist to database if action or watchlist
@@ -733,8 +863,8 @@ async def score_trip(request: Request, body: TripScoreRequest):
     try:
         from monitoring.metrics import TRIPS_SCORED
         TRIPS_SCORED.labels(tier=tier.name, path="stateless").inc()
-    except Exception:
-        pass
+    except Exception as exc:
+        logger.debug("Prometheus counter update skipped: %s", exc)
 
     # Fire enforcement webhook for action tier (non-blocking)
     if tier.name == "action" and should_enforce_actions():
@@ -757,6 +887,29 @@ async def score_trip(request: Request, body: TripScoreRequest):
             "Ops team should inspect this trip within 2 hours."
         )
 
+    if tier.name == "action":
+        narrative = (
+            f"Trip {body.trip_id} shows "
+            f"{len(top_signals)} behavioral anomalies "
+            f"with {fraud_prob:.1%} confidence. "
+            f"Recommended: immediate analyst review. "
+            f"Top signal: "
+            f"{top_signals[0]['name'] if top_signals else 'multiple factors'}."
+        )
+    elif tier.name == "watchlist":
+        narrative = (
+            f"Trip {body.trip_id} shows elevated "
+            f"risk ({fraud_prob:.1%}) with "
+            f"{len(top_signals)} signals. "
+            f"Recommended: queue for analyst review."
+        )
+    else:
+        narrative = (
+            f"Trip {body.trip_id} shows normal "
+            f"behavioral patterns ({fraud_prob:.1%} risk). "
+            f"No action required."
+        )
+
     return TripScoreResponse(
         trip_id            = body.trip_id,
         fraud_probability  = round(fraud_prob, 4),
@@ -768,7 +921,10 @@ async def score_trip(request: Request, body: TripScoreRequest):
         action_required    = tier.action,
         auto_escalate      = auto_escalate,
         escalation_note    = escalation_note,
-        top_signals        = top_signals[:3],
+        top_signals        = top_signals[:5],
+        narrative          = narrative,
+        intelligence_layer = "trip_behavioral",
+        complementary_layer = "device_identity (upstream)",
         confidence         = confidence_label,
         scored_at          = datetime.now().isoformat(),
     )

@@ -39,6 +39,12 @@ const ZONE_COORDINATES = {
   del_gurgaon:         { lat: 28.4595, lon: 77.0266 },
 };
 
+function signalLabel(signal) {
+  if (!signal) return '--';
+  if (typeof signal === 'string') return signal;
+  return signal.detail || signal.name || '--';
+}
+
 export default function TripScorer() {
   const [form, setForm] = useState({
     payment_mode:         'cash',
@@ -266,7 +272,7 @@ export default function TripScorer() {
           {result.top_signals?.length > 0 && (
             <div className="score-signals">
               {result.top_signals.map((s, i) => (
-                <div key={i} className="score-signal">{s}</div>
+                <div key={i} className="score-signal">{signalLabel(s)}</div>
               ))}
             </div>
           )}

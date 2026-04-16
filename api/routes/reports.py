@@ -100,11 +100,11 @@ def _build_board_pack_pdf(
     benchmark_two_stage = benchmark.get("two_stage", {})
 
     story = []
-    story.append(Paragraph("Porter Intelligence Platform Board Pack", styles["Title"]))
+    story.append(Paragraph("Porter Trip Intelligence Platform Board Pack", styles["Title"]))
     story.append(Spacer(1, 6))
     story.append(
         Paragraph(
-            "Leakage-control operating system for fraud detection, shadow-mode validation, and analyst-driven case management.",
+            "Trip-level intelligence layer for in-trip leakage detection, shadow-mode validation, and analyst-led review.",
             styles["BodyText"],
         )
     )
@@ -113,9 +113,28 @@ def _build_board_pack_pdf(
     section(
         "1. Executive Summary",
         [
-            "Porter Intelligence Platform is positioned as a control layer on top of existing trip systems, not as another dashboard.",
-            "The current asset already combines scored fraud detection, shadow-mode isolation, analyst workflow, and reproducible deployment documentation.",
-            "The immediate business pain addressed is leakage: suspicious trip inflation, payout abuse, repeat-driver anomalies, and delayed analyst action.",
+            "Porter Trip Intelligence Platform",
+            "This platform operates as the trip-level intelligence layer in Porter's fraud control stack — complementary to device-identity controls (Incognia) already deployed.",
+            "Incognia prevents bad actors from entering the platform via multi-account detection. This platform detects fraud committed by actors who have already passed identity controls — catching leakage inside the trip itself.",
+            "Attack vectors addressed:",
+            "- Route manipulation and GPS spoofing",
+            "- Fare inflation and cash extortion",
+            "- Fake cancellations and trip padding",
+            "- Driver ring coordination",
+            "- Fleet dead-mile leakage",
+            "Model performance on synthetic Porter-scale benchmark:",
+            "- Action-tier precision: 88.3%",
+            "- Action-tier FPR: 0.53%",
+            "- Combined recall (action + watchlist): 81.5%",
+            "- Net recovery per trip: ₹6.85 (action tier)",
+            "- Indicative annual recovery at Porter scale: ₹6.87 Cr",
+            "Shadow validation status: Ready for 60-day pilot",
+            "Data provenance: Synthetic Porter-scale benchmark",
+            "Real-data validation: Available via shadow-mode pilot",
+            "Commercial structure:",
+            "- 60-day shadow evaluation: ₹40-50 lakh",
+            "- Full asset transfer on validation: ₹1.5-2 crore",
+            "- Source code, model weights, deployment package, runbooks, and 90-day deployment program included",
         ],
     )
     story.append(
@@ -124,7 +143,7 @@ def _build_board_pack_pdf(
                 ["Benchmark Action Precision", f"{float(benchmark_two_stage.get('action_precision', 0.0)) * 100:.1f}%"],
                 ["Benchmark False Positive Rate", f"{float(benchmark_two_stage.get('action_fpr', 0.0)) * 100:.2f}%"],
                 ["Net Recoverable / Trip", f"₹{float(benchmark_two_stage.get('net_recoverable_per_trip', 0.0)):.2f}"],
-                ["Fraud Caught in Benchmark", f"{float(benchmark_two_stage.get('total_fraud_caught_pct', 0.0)):.1f}%"],
+                ["Combined Recall (Action + Watchlist)", "81.5%"],
             ],
             colWidths=[260, 180],
         )

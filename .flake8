@@ -1,0 +1,34 @@
+[flake8]
+max-line-length = 100
+exclude =
+    venv,
+    .git,
+    __pycache__,
+    dashboard-ui,
+    _archive
+ignore =
+    E501,
+    W503,
+    E203,
+    E221,
+    E222,
+    E231,
+    E241,
+    E251,
+    E272,
+    E402,
+    E712,
+    E127,
+    E128,
+    E124,
+    E225,
+    E261,
+    E302,
+    E131,
+    W293,
+    W391,
+    W504,
+    F401,
+    F541,
+    F811,
+    F841

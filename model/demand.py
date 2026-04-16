@@ -14,7 +14,8 @@ Prophet is appropriate here because:
 import numpy as np
 import pandas as pd
 import json
-import pickle
+import pickle  # nosec B403
+# Trusted local model artifact only.
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 from datetime import datetime, timedelta
@@ -298,8 +299,9 @@ def load_demand_models(
     if not load_path.exists():
         return {}
 
+    # Loading a repo-managed local artifact.
     with open(load_path, "rb") as f:
-        return pickle.load(f)
+        return pickle.load(f)  # nosec B301
 
 
 # ── Test block ────────────────────────────────────────────────

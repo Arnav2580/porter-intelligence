@@ -8,7 +8,7 @@ from io import BytesIO
 from pathlib import Path
 
 from fastapi import APIRouter, Depends
-from fastapi.responses import Response
+from fastapi.responses import PlainTextResponse, Response
 from reportlab.lib import colors
 from reportlab.lib.pagesizes import A4
 from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
@@ -33,11 +33,22 @@ _REPO_HANDOVER_MD       = _DOCS_ROOT / "docs" / "handover" / "repo-access-and-ha
 
 _PORTER_BUYER          = "SmartShift Logistics Solutions Pvt Ltd (Porter)"
 _PLATFORM_NAME         = "Porter Intelligence Platform"
-_TOTAL_PRICE_CRORE     = "₹3,25,00,000"
-_TRANCHE_1             = "₹1,00,00,000"
-_TRANCHE_2             = "₹1,00,00,000"
-_TRANCHE_3             = "₹1,25,00,000"
 _SUPPORT_DAYS          = 90
+_SHADOW_EVAL_DAYS      = 60
+_SHADOW_EVAL_FEE       = "₹40-50 lakh"
+_ASSET_TRANSFER_FEE    = "₹1.5-2 crore"
+_SELLER_ENTITY = {
+    "name": "Porter Intelligence (Unregistered)",
+    "address": "[Seller registered address — to be confirmed on execution]",
+    "pan": "[Seller PAN — to be confirmed on execution]",
+    "gstin": "[Seller GSTIN if applicable]",
+    "email": "arnav2580goyal@gmail.com",
+    "signatory": "Arnav Goyal, Founder",
+}
+_DRAFT_FOOTER_LINES = (
+    "DRAFT — For discussion purposes only.",
+    "Final terms subject to legal review. Not binding until executed by both parties.",
+)
 
 
 # ---------------------------------------------------------------------------
@@ -82,14 +93,58 @@ def _table_style_default():
     ])
 
 
-def _sig_block(entity: str) -> list:
+def _draw_footer(canvas, doc) -> None:
+    canvas.saveState()
+    canvas.setFillColor(colors.HexColor("#888888"))
+    canvas.setFont("Helvetica", 8)
+    y_pos = 20
+    for line in _DRAFT_FOOTER_LINES:
+        canvas.drawCentredString(A4[0] / 2, y_pos, line)
+        y_pos += 9
+    canvas.restoreState()
+
+
+def _commercial_schedule_text() -> str:
+    return f"""
+Commercial Structure — {_PLATFORM_NAME}
+
+Phase 1: Shadow Evaluation
+- Duration: {_SHADOW_EVAL_DAYS} days
+- Fee: {_SHADOW_EVAL_FEE} (exclusive evaluation)
+- Deliverable: Validation report with Porter production-format data
+- Risk to Porter: Zero operational risk — read-only shadow mode, no live enforcement writeback
+
+Phase 2: Asset Transfer (on validation)
+- Fee: {_ASSET_TRANSFER_FEE}
+- Includes: Source code, model weights, deployment package, runbooks, analyst training
+- Timeline: {_SUPPORT_DAYS}-day deployment program
+- Payment: Milestone-based tranches tied to execution, deployment progress, and handover completion
+
+Notes
+- Device identity controls remain upstream with Incognia.
+- This platform is the trip intelligence layer focused on in-trip behavioral leakage.
+- Final commercial terms remain subject to legal review and execution.
+""".strip()
+
+
+def _sig_block(
+    entity: str,
+    signatory: str | None = None,
+    designation: str | None = None,
+) -> list:
     S = _styles()
     return [
         Spacer(1, 14),
         Paragraph(f"For and on behalf of <b>{entity}</b>:", S["body"]),
         Spacer(1, 8),
-        Paragraph("Name: _________________________________", S["body"]),
-        Paragraph("Designation: ___________________________", S["body"]),
+        Paragraph(
+            f"Name: {signatory or '_________________________________'}",
+            S["body"],
+        ),
+        Paragraph(
+            f"Designation: {designation or '___________________________'}",
+            S["body"],
+        ),
         Paragraph("Date: __________________________________", S["body"]),
         Paragraph("Signature: _____________________________", S["body"]),
         Spacer(1, 6),
@@ -117,7 +172,10 @@ def _build_nda_pdf() -> bytes:
         Paragraph("PARTIES", S["h2"]),
         Paragraph(
             'This Mutual Non-Disclosure Agreement ("Agreement") is entered into between '
-            '<b>[Seller Entity Name]</b> ("Discloser") and '
+            f'<b>{_SELLER_ENTITY["name"]}</b> ("Discloser"), '
+            f'with correspondence address {_SELLER_ENTITY["address"]}, '
+            f'PAN {_SELLER_ENTITY["pan"]}, GSTIN {_SELLER_ENTITY["gstin"]}, '
+            f'and email {_SELLER_ENTITY["email"]}, and '
             f'<b>{_PORTER_BUYER}</b> ("Recipient"), and vice versa \u2014 each party may '
             "disclose and receive Confidential Information under this Agreement.",
             S["body"],
@@ -154,8 +212,8 @@ def _build_nda_pdf() -> bytes:
         Paragraph("PERMITTED USE", S["h2"]),
         Paragraph(
             f"Confidential Information disclosed under this Agreement may be used solely for: "
-            f"evaluation, shadow-mode validation, deployment, and operational use of the "
-            f"{_PLATFORM_NAME}.",
+            f"Phase 1 shadow-mode evaluation, validation, deployment planning, and operational "
+            f"use of the {_PLATFORM_NAME} if a Phase 2 asset-transfer agreement is executed.",
             S["body"],
         ),
 
@@ -178,7 +236,7 @@ def _build_nda_pdf() -> bytes:
         Paragraph("GOVERNING LAW", S["h2"]),
         Paragraph(
             "This Agreement shall be governed by and construed in accordance with the laws of India. "
-            "Disputes shall be subject to the exclusive jurisdiction of courts in [Seller's city].",
+            "Disputes shall be subject to the exclusive jurisdiction of courts in Bengaluru, Karnataka.",
             S["body"],
         ),
 
@@ -186,9 +244,13 @@ def _build_nda_pdf() -> bytes:
         Paragraph("SIGNATURES", S["h2"]),
         HRFlowable(width="100%", thickness=0.5, color=colors.HexColor("#aaaaaa")),
     ]
-    story += _sig_block("[Seller Entity Name]")
+    story += _sig_block(
+        _SELLER_ENTITY["name"],
+        signatory=_SELLER_ENTITY["signatory"],
+        designation="Founder",
+    )
     story += _sig_block(_PORTER_BUYER)
-    doc.build(story)
+    doc.build(story, onFirstPage=_draw_footer, onLaterPages=_draw_footer)
     return buf.getvalue()
 
 
@@ -221,7 +283,7 @@ def _build_commercial_schedule_pdf() -> bytes:
                 ["Infrastructure", "Docker Compose, AWS ECS templates, Prometheus/Grafana configs"],
                 ["Digital twin", "22-city simulation with configurable volume and fraud injection"],
                 ["Schema mapper", "Field-mapping layer for Porter trip event integration"],
-                ["Test suite", "56-test pytest suite covering all major paths"],
+                ["Validation suite", "Comprehensive pytest validation covering major platform paths"],
             ],
             colWidths=[150, 310],
         ).setStyle(_table_style_default()),
@@ -230,22 +292,40 @@ def _build_commercial_schedule_pdf() -> bytes:
         Paragraph("2. Payment Schedule", S["h2"]),
         Table(
             [
-                ["Tranche", "Amount (excl. GST)", "Trigger", "Timeline"],
-                ["Tranche 1", _TRANCHE_1, "Signing of this schedule", "Day 0"],
-                ["Tranche 2", _TRANCHE_2, "Shadow-mode acceptance (all 5 criteria)", "Day 30–60"],
-                ["Tranche 3", _TRANCHE_3, "Live rollout acceptance + handover complete", "Day 60–90"],
-                ["Total", _TOTAL_PRICE_CRORE, "GST (18%) additional", ""],
+                ["Phase", "Fee (excl. GST)", "Deliverable", "Commercial Trigger"],
+                [
+                    "Phase 1 — Shadow Evaluation",
+                    _SHADOW_EVAL_FEE,
+                    "Read-only shadow run plus Porter validation report",
+                    "Executed evaluation order / NDA",
+                ],
+                [
+                    "Phase 2 — Asset Transfer",
+                    _ASSET_TRANSFER_FEE,
+                    "Source code, model weights, deployment package, runbooks, training",
+                    "Validation success and signed asset-transfer agreement",
+                ],
+                [
+                    "Phase 2 payment structure",
+                    "Milestone-based tranches",
+                    f"{_SUPPORT_DAYS}-day deployment program and handover completion",
+                    "Deployment milestones and final sign-off",
+                ],
             ],
-            colWidths=[90, 115, 195, 60],
+            colWidths=[125, 110, 160, 115],
         ).setStyle(_table_style_default()),
         Spacer(1, 8),
-        Paragraph("All amounts are exclusive of GST. GST at 18% is applicable.", S["small"]),
+        Paragraph(
+            "All amounts are exclusive of GST. GST at 18% is applicable. "
+            "Phase 1 is an exclusive evaluation engagement. Phase 2 proceeds only after validation success.",
+            S["small"],
+        ),
         Spacer(1, 12),
 
         Paragraph("3. Acceptance Criteria", S["h2"]),
         Paragraph(
-            "Tranche 2 payment is triggered when all five criteria below are confirmed in writing. "
-            "See the Acceptance Criteria Checklist document for full measurement detail.",
+            "Progression from Phase 1 shadow evaluation into Phase 2 asset transfer requires the five criteria below "
+            "to be confirmed in writing. See the Acceptance Criteria Checklist document for full measurement detail.",
             S["body"],
         ),
         Table(
@@ -263,11 +343,10 @@ def _build_commercial_schedule_pdf() -> bytes:
 
         Paragraph("4. Intellectual Property", S["h2"]),
         Paragraph(
-            "Upon receipt of full payment, Porter receives a <b>perpetual, irrevocable, non-exclusive "
-            "licence</b> to use, modify, and deploy the platform. "
-            "For an exclusive licence (Porter as sole licensee), an additional ₹50,00,000 applies. "
-            "Source code is provided without open-source obligation. Porter may modify and integrate "
-            "the platform without restriction.",
+            "Phase 1 grants Porter an exclusive evaluation right for the shadow-validation period only. "
+            "Upon completion of Phase 2 payment obligations, Porter receives a <b>perpetual, irrevocable "
+            "licence</b> to use, modify, and deploy the platform internally. Source code is provided without "
+            "open-source obligation. Porter may modify and integrate the platform without restriction.",
             S["body"],
         ),
 
@@ -275,17 +354,18 @@ def _build_commercial_schedule_pdf() -> bytes:
         Paragraph(
             f"The platform is delivered as demonstrated during evaluation. The seller warrants "
             f"that the platform performs materially as described in technical documentation for "
-            f"<b>{_SUPPORT_DAYS} days</b> from signing. The seller does not warrant specific fraud "
-            "detection rates on Porter's live data — this is the purpose of shadow-mode validation. "
+            f"<b>{_SUPPORT_DAYS} days</b> from Phase 2 execution. The seller does not warrant specific fraud "
+            "detection rates on Porter's live data before validation — this is the purpose of the Phase 1 "
+            "shadow-mode evaluation. "
             "Defects reported during the 90-day support window will be addressed with reasonable effort.",
             S["body"],
         ),
 
         Paragraph("6. Deployment and Support Scope", S["h2"]),
         Paragraph(
-            f"A {_SUPPORT_DAYS}-day deployment and support engagement is included. See the "
-            "Deployment and Support Scope document for full phase breakdown, responsibility split, "
-            "and escalation path.",
+            f"A {_SUPPORT_DAYS}-day deployment and support engagement is included after Phase 2 execution. "
+            "See the Deployment and Support Scope document for full deployment workstream breakdown, "
+            "responsibility split, and escalation path.",
             S["body"],
         ),
 
@@ -294,9 +374,13 @@ def _build_commercial_schedule_pdf() -> bytes:
         Paragraph("SIGNATURES", S["h2"]),
         HRFlowable(width="100%", thickness=0.5, color=colors.HexColor("#aaaaaa")),
     ]
-    story += _sig_block("[Seller Entity Name]")
+    story += _sig_block(
+        _SELLER_ENTITY["name"],
+        signatory=_SELLER_ENTITY["signatory"],
+        designation="Founder",
+    )
     story += _sig_block(_PORTER_BUYER)
-    doc.build(story)
+    doc.build(story, onFirstPage=_draw_footer, onLaterPages=_draw_footer)
     return buf.getvalue()
 
 
@@ -321,7 +405,7 @@ def _build_acceptance_criteria_pdf() -> bytes:
         Paragraph("Overview", S["h2"]),
         Paragraph(
             "This checklist defines five measurable conditions that constitute shadow-mode success "
-            "and trigger Tranche 2 payment. All five must be satisfied. "
+            "and trigger progression from Phase 1 evaluation into Phase 2 asset transfer. All five must be satisfied. "
             "Criteria 1–3 are evaluated at Day 30. Criterion 4 requires a minimum of 200 reviewed "
             "action-tier cases. Criterion 5 requires written confirmation from Porter's technical lead.",
             S["body"],
@@ -390,13 +474,17 @@ def _build_acceptance_criteria_pdf() -> bytes:
         Spacer(1, 10),
         Paragraph(
             "We confirm that all five acceptance criteria have been met as described above and "
-            "authorise release of Tranche 2 payment.",
+            "authorise progression into the Phase 2 asset-transfer and deployment program.",
             S["body"],
         ),
     ]
-    story += _sig_block("[Seller Entity Name]")
+    story += _sig_block(
+        _SELLER_ENTITY["name"],
+        signatory=_SELLER_ENTITY["signatory"],
+        designation="Founder",
+    )
     story += _sig_block(_PORTER_BUYER)
-    doc.build(story)
+    doc.build(story, onFirstPage=_draw_footer, onLaterPages=_draw_footer)
     return buf.getvalue()
 
 
@@ -417,39 +505,43 @@ def _build_support_scope_pdf() -> bytes:
             S["small"],
         ),
         Spacer(1, 14),
+        Paragraph(
+            "This scope applies after successful completion of the Phase 1 shadow evaluation and execution of the Phase 2 asset-transfer agreement.",
+            S["body"],
+        ),
 
         Paragraph("Engagement Overview", S["h2"]),
         Table(
             [
                 ["Phase", "Duration", "Objective"],
-                ["Phase 1 — Setup and Shadow Activation", "Day 1–30", "Environment live, shadow cases flowing"],
-                ["Phase 2 — Validation and Acceptance", "Day 31–60", "Acceptance criteria confirmed"],
-                ["Phase 3 — Rollout and Handover", "Day 61–90", "Live enforcement, full handover"],
+                ["Deployment Workstream 1 — Environment Setup", "Day 1–30", "Production environment live and integration-ready"],
+                ["Deployment Workstream 2 — Productionisation", "Day 31–60", "Analyst rollout, calibration, and monitored operations"],
+                ["Deployment Workstream 3 — Handover", "Day 61–90", "Training, documentation transfer, and stabilisation"],
             ],
             colWidths=[220, 80, 160],
         ).setStyle(_table_style_default()),
         Spacer(1, 12),
 
-        Paragraph("Phase 1 Deliverables (Day 1–30)", S["h2"]),
+        Paragraph("Deployment Workstream 1 Deliverables (Day 1–30)", S["h2"]),
         Paragraph(
             "Environment provisioned and health endpoint returning ok. "
             "Schema mapping adapter configured for Porter's trip event format. "
-            "Shadow mode active — cases scoring, no enforcement dispatch. "
+            "Shadow validation learnings incorporated into the production baseline. "
             "Two analyst training walkthroughs (1 hour each). "
             "Weekly written progress report every Friday.",
             S["body"],
         ),
 
-        Paragraph("Phase 2 Deliverables (Day 31–60)", S["h2"]),
+        Paragraph("Deployment Workstream 2 Deliverables (Day 31–60)", S["h2"]),
         Paragraph(
-            "Shadow-mode case review with Porter's fraud/ops team. "
+            "Trip anomaly review with Porter's fraud/ops team. "
             "Reviewed-case precision tracked and reported weekly. "
             "One threshold tuning cycle included if Porter data distribution differs materially. "
             "One joint evaluation session with Porter's fraud lead (1.5 hours).",
             S["body"],
         ),
 
-        Paragraph("Phase 3 Deliverables (Day 61–90)", S["h2"]),
+        Paragraph("Deployment Workstream 3 Deliverables (Day 61–90)", S["h2"]),
         Paragraph(
             "Live enforcement mode activation (pending Porter written approval). "
             "Enforcement dispatch webhook integrated with Porter's driver management system. "
@@ -506,9 +598,13 @@ def _build_support_scope_pdf() -> bytes:
         Paragraph("SIGNATURES", S["h2"]),
         HRFlowable(width="100%", thickness=0.5, color=colors.HexColor("#aaaaaa")),
     ]
-    story += _sig_block("[Seller Entity Name]")
+    story += _sig_block(
+        _SELLER_ENTITY["name"],
+        signatory=_SELLER_ENTITY["signatory"],
+        designation="Founder",
+    )
     story += _sig_block(_PORTER_BUYER)
-    doc.build(story)
+    doc.build(story, onFirstPage=_draw_footer, onLaterPages=_draw_footer)
     return buf.getvalue()
 
 
@@ -590,6 +686,18 @@ async def download_commercial_schedule(
         media_type="application/pdf",
         headers={"Content-Disposition": 'attachment; filename="Commercial-Schedule.pdf"'},
     )
+
+
+@router.get(
+    "/commercial-schedule",
+    summary="Commercial schedule summary",
+    response_class=PlainTextResponse,
+)
+async def commercial_schedule_summary(
+    user=Depends(require_permission("read:all")),
+):
+    """Return the phased commercial structure as plain text."""
+    return PlainTextResponse(_commercial_schedule_text())
 
 
 @router.get(

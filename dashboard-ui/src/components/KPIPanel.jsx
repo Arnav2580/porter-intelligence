@@ -175,6 +175,16 @@ export default function KPIPanel({ runtimeMeta = null }) {
         </div>
       </div>
 
+      <div style={{
+        fontSize: 11,
+        color: 'var(--muted)',
+        letterSpacing: '0.08em',
+        textTransform: 'uppercase',
+        marginBottom: 12,
+      }}>
+        Trip Intelligence Layer &middot; Live from PostgreSQL &middot; Complements Incognia device controls
+      </div>
+
       <div className="kpi-grid">
         <KPICard
           label="Reviewed Cases (24h)"
@@ -183,7 +193,7 @@ export default function KPIPanel({ runtimeMeta = null }) {
           color="blue"
         />
         <KPICard
-          label="Reviewed Precision"
+          label="Trip Score Precision"
           value={formatPercent(
             reviewedPrecision,
             reviewedMetricsLive,
@@ -194,7 +204,7 @@ export default function KPIPanel({ runtimeMeta = null }) {
           color="green"
         />
         <KPICard
-          label="Reviewed False Alarm Rate"
+          label="False Positive Rate"
           value={formatPercent(
             reviewedFalseAlarmRate,
             reviewedMetricsLive,
@@ -215,7 +225,7 @@ export default function KPIPanel({ runtimeMeta = null }) {
 
       <div className="annual-card" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
         <div>
-          <div className="annual-label">Confirmed Recoverable (24h)</div>
+          <div className="annual-label">Leakage Recovered (Live)</div>
           <div className="annual-value">\u20B9{confirmedRecoverable.toLocaleString('en-IN', { maximumFractionDigits: 0 })}</div>
         </div>
         <div style={{ textAlign: 'right' }}>
@@ -230,10 +240,10 @@ export default function KPIPanel({ runtimeMeta = null }) {
         </div>
         <div style={{ color: 'var(--text)', fontSize: 12, lineHeight: 1.8 }}>
           <div>
-            Action cases: <strong>{actionCases}</strong> &middot; Watchlist: <strong>{watchlistCases}</strong> &middot; Cases today: <strong>{data.cases_today}</strong>
+            Trip anomalies flagged: <strong>{actionCases}</strong> &middot; Watchlist: <strong>{watchlistCases}</strong> &middot; Trips scored today: <strong>{data.cases_today}</strong>
           </div>
           <div>
-            Action score avg: <strong>{actionScoreAvg.toFixed(1)}%</strong> &middot; Est. recoverable / trip: <strong>\u20B9{netRecTrip.toFixed(2)}</strong> &middot; Indicative annual recovery: <strong>\u20B9{annualCrore.toFixed(1)} Crore</strong>
+            Action score avg: <strong>{actionScoreAvg.toFixed(1)}%</strong> &middot; Net recovery per trip: <strong>\u20B9{netRecTrip.toFixed(2)}</strong> &middot; Indicative annual recovery: <strong>\u20B9{annualCrore.toFixed(1)} Crore</strong>
           </div>
         </div>
         <div style={{ color: 'var(--muted)', fontSize: 11, marginTop: 4, fontFamily: 'var(--font-mono)' }}>

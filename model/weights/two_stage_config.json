@@ -2,6 +2,20 @@
   "action_threshold": 0.94,
   "watchlist_threshold": 0.45,
   "clear_threshold": 0.0,
+  "tiers": {
+    "clear": {
+      "threshold_low": 0.0,
+      "threshold_high": 0.45
+    },
+    "watchlist": {
+      "threshold_low": 0.45,
+      "threshold_high": 0.94
+    },
+    "action": {
+      "threshold_low": 0.94,
+      "threshold_high": 1.0
+    }
+  },
   "evaluation": {
     "total_trips": 100000,
     "total_fraud": 5895,

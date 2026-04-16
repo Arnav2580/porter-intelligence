@@ -102,8 +102,11 @@ export default function Dashboard() {
         <div className="header-logo">
           <div className="header-logo-mark">P</div>
           <div>
-            <div className="header-title">Porter Intelligence Dashboard</div>
-            <div className="header-subtitle">Leakage Control Platform &middot; Real-Time City Operations</div>
+            <div className="header-title">Porter Trip Intelligence Platform</div>
+            <div className="header-subtitle">Trip-Level Intelligence &middot; 22 Cities &middot; Live Scoring</div>
+            <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 4 }}>
+              Complements device-intelligence controls with trip-level behavioral scoring
+            </div>
           </div>
         </div>
         <div className="header-right">

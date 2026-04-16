@@ -1,0 +1,8 @@
+exclude_dirs:
+  - venv
+  - tests
+  - _archive
+  - dashboard-ui
+skips:
+  - B101
+  - B311

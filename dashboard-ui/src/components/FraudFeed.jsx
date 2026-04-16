@@ -2,12 +2,12 @@ import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { apiGet } from '../utils/api';
 
 const FRAUD_TYPE_LABELS = {
-  fake_trip:          'Fake Trip',
-  cash_extortion:     'Cash Extortion',
-  route_deviation:    'Route Deviation',
-  fake_cancellation:  'Fake Cancel',
-  duplicate_trip:     'Duplicate Trip',
-  inflated_distance:  'Inflated Dist.',
+  fake_trip:          'Ghost Trip Detected',
+  cash_extortion:     'Fare Extortion Signal',
+  route_deviation:    'Route Manipulation',
+  fake_cancellation:  'Cancellation Abuse',
+  duplicate_trip:     'Duplicate Trip Pattern',
+  inflated_distance:  'Distance Inflation',
 };
 
 const ZONE_LABELS = {
@@ -76,9 +76,12 @@ export default function FraudFeed({ thresholds }) {
       <div className="feed-header">
         <div>
           <div style={{ fontFamily: 'var(--font-display)', fontWeight: 700, fontSize: 14 }}>
-            Fraud Activity Feed
+            Trip Anomaly Feed
           </div>
-          <div className="feed-count" style={{ color: isBenchmark ? 'var(--warning)' : 'var(--muted)' }}>
+          <div className="feed-count" style={{ color: 'var(--muted)' }}>
+            Real-time trip scoring &middot; Behavioral signals only &middot; Identity controls handled by upstream systems
+          </div>
+          <div className="feed-count" style={{ color: isBenchmark ? 'var(--warning)' : 'var(--muted)', marginTop: 4 }}>
             {feedSubLabel}
           </div>
         </div>
