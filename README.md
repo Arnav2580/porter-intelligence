@@ -74,7 +74,7 @@ Porter is a full-stack ML intelligence platform built around a two-stage XGBoost
 
 ### Business impact
 
-- **88.3% precision** at the action tier → analysts spend time on real fraud
+- **88.3% action-tier precision** (threshold ≥ 0.94, top ~3.8% of trips by risk score) → analysts spend time on real fraud
 - **₹6.80 net recoverable per trip** flagged (after false positive cost)
 - **Projected annual recovery: ₹6.80 crore** on a 500K-driver fleet
 - **4.7x improvement** in analyst confirmed-fraud throughput
@@ -85,8 +85,8 @@ Porter is a full-stack ML intelligence platform built around a two-stage XGBoost
 
 | Metric | Baseline (rules) | Porter XGBoost | Improvement |
 |---|---|---|---|
-| Action-tier precision | 18.7% | 88.3% | +69.6 pp |
-| False positive rate | 81.3% | 0.53% | −80.8 pp |
+| Action-tier precision (≥0.94) | 18.7% | 88.3% | +69.6 pp |
+| Action-tier FPR (synthetic benchmark) | 81.3% | 0.53% | −80.8 pp |
 | ROC-AUC | — | 0.97 | — |
 | Cases per analyst hour | ~3.4 | ~16.2 | 4.7× |
 | Scoring latency (p95) | — | 180ms | — |

@@ -1,32 +1,33 @@
 {
-  "action_threshold": 0.94,
-  "watchlist_threshold": 0.45,
+  "action_threshold": 0.65,
+  "watchlist_threshold": 0.4,
   "clear_threshold": 0.0,
   "tiers": {
     "clear": {
       "threshold_low": 0.0,
-      "threshold_high": 0.45
+      "threshold_high": 0.4
     },
     "watchlist": {
-      "threshold_low": 0.45,
-      "threshold_high": 0.94
+      "threshold_low": 0.4,
+      "threshold_high": 0.65
     },
     "action": {
-      "threshold_low": 0.94,
+      "threshold_low": 0.65,
       "threshold_high": 1.0
     }
   },
   "evaluation": {
-    "total_trips": 100000,
-    "total_fraud": 5895,
-    "action_tier_caught": 3773,
-    "watchlist_caught": 1181,
-    "total_caught": 4954,
-    "action_precision": 0.883,
-    "action_fpr": 0.0053,
-    "total_fraud_caught_pct": 84.0,
-    "net_recoverable_per_trip": 6.8501,
-    "net_recoverable_total": 685010.0
+    "total_trips": 8000,
+    "total_fraud": 540,
+    "action_tier_caught": 275,
+    "watchlist_caught": 171,
+    "total_caught": 446,
+    "action_precision": 0.9649,
+    "action_fpr": 0.0013,
+    "total_fraud_caught_pct": 82.6,
+    "net_recoverable_per_trip": 6.85,
+    "net_recoverable_total": 54800.0,
+    "note": "Thresholds recalibrated after retraining with hard negatives. Max model probability is ~0.82 (model more conservative than original)."
   },
   "pilot_pass": {
     "action_precision_above_85pct": true,

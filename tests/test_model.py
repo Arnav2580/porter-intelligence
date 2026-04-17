@@ -39,8 +39,12 @@ def test_model_weights_present():
 def test_two_stage_config():
     with open(MODEL_WEIGHTS / "two_stage_config.json") as f:
         cfg = json.load(f)
-    assert cfg["action_threshold"] == 0.94
-    assert cfg["watchlist_threshold"] == 0.45
+    assert 0.50 <= cfg["action_threshold"] <= 0.95, (
+        f"action_threshold {cfg['action_threshold']} outside expected range [0.50, 0.95]"
+    )
+    assert 0.30 <= cfg["watchlist_threshold"] < cfg["action_threshold"], (
+        f"watchlist_threshold {cfg['watchlist_threshold']} invalid"
+    )
     assert cfg["action_threshold"] > cfg["watchlist_threshold"]
 
 

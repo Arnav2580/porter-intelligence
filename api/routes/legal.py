@@ -35,8 +35,8 @@ _PORTER_BUYER          = "SmartShift Logistics Solutions Pvt Ltd (Porter)"
 _PLATFORM_NAME         = "Porter Intelligence Platform"
 _SUPPORT_DAYS          = 90
 _SHADOW_EVAL_DAYS      = 60
-_SHADOW_EVAL_FEE       = "₹40-50 lakh"
-_ASSET_TRANSFER_FEE    = "₹1.5-2 crore"
+_SHADOW_EVAL_FEE       = "₹37.5 lakh"
+_ASSET_TRANSFER_FEE    = "₹37.5 lakh (₹18.75L on validation + ₹18.75L on live rollout)"
 _SELLER_ENTITY = {
     "name": "Porter Intelligence (Unregistered)",
     "address": "[Seller registered address — to be confirmed on execution]",

@@ -281,6 +281,7 @@ def train_xgboost(
         learning_rate         = 0.05,
         subsample             = 0.8,
         colsample_bytree      = 0.8,
+        min_child_weight      = 5,          # modest increase — prevents per-leaf overfit
         scale_pos_weight      = spw,
         eval_metric           = "aucpr",
         early_stopping_rounds = 50,
@@ -407,9 +408,43 @@ def run_training_pipeline(
     y_val       = y_hist.iloc[split_idx:]
     recov_val   = hist_df["recoverable_amount_inr"].iloc[split_idx:]
 
+    # ── Inject hard negatives into training set ────────────────
+    # Hard negatives are pre-computed feature vectors of legitimate
+    # trips that look suspicious (surge, airport, new driver, etc.)
+    # They teach the model where the real decision boundary is.
+    from generator.hard_negatives import generate_hard_negatives
+
+    fraud_count = int(y_train.sum())
+    n_per_type  = max(200, int(fraud_count * 0.15))
+    hn_df       = generate_hard_negatives(n_per_type=n_per_type)
+
+    hn_X = hn_df[X_train.columns].astype(float)
+    hn_y = pd.Series(
+        hn_df["is_fraud"].values,
+        index=range(len(X_train), len(X_train) + len(hn_df)),
+    )
+    hn_w = pd.Series(
+        hn_df["fraud_confidence_score"].values,
+        index=range(len(X_train), len(X_train) + len(hn_df)),
+    )
+
+    X_train_aug = pd.concat(
+        [X_train, hn_X.reset_index(drop=True).set_index(hn_y.index)],
+        ignore_index=True,
+    )
+    y_train_aug = pd.concat([y_train, hn_y], ignore_index=True)
+    w_train_aug = pd.concat([w_train, hn_w], ignore_index=True)
+
+    console.print(
+        f"[cyan]Hard negatives:[/cyan] "
+        f"{len(hn_df):,} added ({n_per_type}/type × 5 types) | "
+        f"Total training: {len(X_train_aug):,} | "
+        f"Fraud rate: {y_train_aug.mean()*100:.2f}%"
+    )
+
     # Train model
     model, feature_importance = train_xgboost(
-        X_train, y_train, w_train,
+        X_train_aug, y_train_aug, w_train_aug,
     )
 
     # Tune threshold on validation slice
