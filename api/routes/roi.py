@@ -285,15 +285,15 @@ def roi_summary(
             "Net recovery goes negative if action-tier FPR on real data exceeds ~15%",
         ],
         "shadow_pilot_value": (
-            "The 60-day shadow pilot validates these inputs on Porter's real trip data. "
-            "If action-tier precision on Porter trips >= 70%, net annual benefit is confirmed. "
-            "Phase 2 payment (₹18.75L) is triggered only on pilot success."
+            "The 90-day validation program runs on Porter's real trip data in shadow mode. "
+            "If action-tier precision >= 70% and FPR <= 15%, Tranche 2 (₹2.25 crore) is triggered. "
+            "Shadow mode: zero operational risk — read-only, no enforcement writeback."
         ),
         "commercial_structure": {
-            "phase_1_shadow_eval": "₹37.5 lakh on signing — shadow mode, 60-day validation",
-            "phase_2_validation":  "₹18.75 lakh on Phase 1 success (>=70% action precision)",
-            "phase_3_transfer":    "₹18.75 lakh after first month of live recovery data",
-            "total":               "₹75 lakh milestone-gated",
-            "no_cure_no_pay":      "Phase 2 & 3 not due if Phase 1 precision < 70%",
+            "tranche_1":    "₹1,00,00,000 (₹1 crore) on signing — non-refundable, full IP transfer",
+            "tranche_2":    "₹2,25,00,000 (₹2.25 crore) on 90-day validation success",
+            "total":        "₹3,25,00,000 (₹3.25 crore) total",
+            "no_cure_no_pay": "Tranche 2 not due if validation criteria unmet. Porter retains all IP.",
+            "exclusivity":  "Not sold to any other Indian logistics company for 24 months",
         },
     }

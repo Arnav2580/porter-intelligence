@@ -42,7 +42,7 @@ TIERS = {
     "action": ScoringTier(
         name            = "action",
         label           = "ACTION REQUIRED",
-        threshold_low   = 0.94,
+        threshold_low   = 0.80,
         threshold_high  = 1.00,
         color           = "#EF4444",   # red
         action          = "Investigate immediately. "
@@ -53,8 +53,8 @@ TIERS = {
     "watchlist": ScoringTier(
         name            = "watchlist",
         label           = "WATCHLIST",
-        threshold_low   = 0.45,
-        threshold_high  = 0.94,
+        threshold_low   = 0.50,
+        threshold_high  = 0.80,
         color           = "#F59E0B",   # amber
         action          = "Monitor. Escalates to ACTION "
                           "if driver appears 3+ times in 24hrs.",
@@ -65,7 +65,7 @@ TIERS = {
         name            = "clear",
         label           = "CLEAR",
         threshold_low   = 0.00,
-        threshold_high  = 0.45,
+        threshold_high  = 0.50,
         color           = "#22C55E",   # green
         action          = "No action required.",
         auto_escalate   = False,
