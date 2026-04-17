@@ -38,16 +38,23 @@ def _surge_pricing(n: int) -> np.ndarray:
     """
     Legitimate surge-pricing trips.
 
-    Fraud signal present:  high fare_to_expected_ratio (2.5-4.0×)
-    Why it's not fraud:    surge_multiplier matches and explains fare
+    Fraud signal present:  high surge_multiplier, high fare_inr
+    Why it's not fraud:    fare = expected * surge → surge-adjusted ratio ≈ 1.0
                            UPI payment, verified driver, no cancellations
+
+    fare_to_expected_ratio uses the same surge-adjusted formula as features.py:
+      ratio = fare / (expected_fare * surge_multiplier) ≈ 1.0 for clean surge trips
     """
-    surge     = rng.uniform(2.5, 4.0, n)
+    surge     = rng.uniform(1.5, 4.5, n)
     distance  = rng.uniform(8, 25, n)
     duration  = distance / rng.uniform(18, 28, n) * 60
     fare      = (50 + 12 * distance) * surge * rng.uniform(0.95, 1.05, n)
     fare_per_km = fare / np.clip(distance, 0.1, None)
     haversine = distance * rng.uniform(0.88, 0.97, n)
+
+    # Surge-adjusted ratio: fare / (expected * surge) ≈ 1.0 for clean trips
+    surge_adj_expected = np.clip(50 + 12 * distance, 1, None) * np.clip(surge, 1, None)
+    fare_to_expected = fare / surge_adj_expected
 
     rows = np.column_stack([
         distance,                           # declared_distance_km
@@ -55,7 +62,7 @@ def _surge_pricing(n: int) -> np.ndarray:
         fare,                               # fare_inr
         surge,                              # surge_multiplier
         rng.uniform(3.0, 6.0, n),          # zone_demand_at_time (high — explains surge)
-        fare / np.clip(50 + 12 * distance, 1, None),  # fare_to_expected_ratio
+        fare_to_expected,                   # fare_to_expected_ratio (surge-adjusted, ≈ 1.0)
         distance / np.clip(duration, 0.1, None),       # distance_time_ratio
         fare_per_km,                        # fare_per_km
         haversine,                          # pickup_dropoff_haversine_km

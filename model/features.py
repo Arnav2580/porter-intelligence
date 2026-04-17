@@ -101,8 +101,11 @@ def compute_trip_features(
         return veh.base_fare + veh.per_km_rate * row["declared_distance_km"]
 
     df["expected_fare"] = df.apply(expected_fare, axis=1)
+    # Surge-adjusted: ratio close to 1.0 for legitimate surge trips;
+    # elevated only when fare exceeds what surge alone explains.
+    surge = df.get("surge_multiplier", pd.Series(1.0, index=df.index)).clip(lower=1.0)
     df["fare_to_expected_ratio"] = (
-        df["fare_inr"] / df["expected_fare"].clip(lower=1.0)
+        df["fare_inr"] / (df["expected_fare"].clip(lower=1.0) * surge)
     ).round(4)
 
     # ── Distance / time ratio ──────────────────────────────

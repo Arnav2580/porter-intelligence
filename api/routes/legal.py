@@ -34,9 +34,17 @@ _REPO_HANDOVER_MD       = _DOCS_ROOT / "docs" / "handover" / "repo-access-and-ha
 _PORTER_BUYER          = "SmartShift Logistics Solutions Pvt Ltd (Porter)"
 _PLATFORM_NAME         = "Porter Intelligence Platform"
 _SUPPORT_DAYS          = 90
-_SHADOW_EVAL_DAYS      = 60
-_SHADOW_EVAL_FEE       = "₹37.5 lakh"
-_ASSET_TRANSFER_FEE    = "₹37.5 lakh (₹18.75L on validation + ₹18.75L on live rollout)"
+_VALIDATION_DAYS       = 90
+_TRANCHE_1_INR         = 10_000_000
+_TRANCHE_1_DISPLAY     = "₹1,00,00,000 (₹1 crore)"
+_TRANCHE_2_INR         = 22_500_000
+_TRANCHE_2_DISPLAY     = "₹2,25,00,000 (₹2.25 crore)"
+_TOTAL_INR             = 32_500_000
+_TOTAL_DISPLAY         = "₹3,25,00,000 (₹3.25 crore)"
+# Legacy vars kept for backward compat in text helpers
+_SHADOW_EVAL_DAYS      = 90
+_SHADOW_EVAL_FEE       = _TRANCHE_1_DISPLAY
+_ASSET_TRANSFER_FEE    = _TRANCHE_2_DISPLAY
 _SELLER_ENTITY = {
     "name": "Porter Intelligence (Unregistered)",
     "address": "[Seller registered address — to be confirmed on execution]",
@@ -107,23 +115,38 @@ def _draw_footer(canvas, doc) -> None:
 def _commercial_schedule_text() -> str:
     return f"""
 Commercial Structure — {_PLATFORM_NAME}
+Structure: Two-tranche milestone acquisition. Total: {_TOTAL_DISPLAY}.
 
-Phase 1: Shadow Evaluation
-- Duration: {_SHADOW_EVAL_DAYS} days
-- Fee: {_SHADOW_EVAL_FEE} (exclusive evaluation)
-- Deliverable: Validation report with Porter production-format data
-- Risk to Porter: Zero operational risk — read-only shadow mode, no live enforcement writeback
+TRANCHE 1 — {_TRANCHE_1_DISPLAY}
+Due: On signing. Non-refundable.
+What transfers immediately: Full IP — all source code, model weights, infrastructure.
+Includes:
+  - Full source code transfer (Python/FastAPI backend, React frontend, ML pipeline)
+  - Model weights and training pipeline (XGBoost + hard-negative retrain)
+  - AWS deployment package (ECS, Dockerfile, IaC)
+  - Shadow mode deployment on Porter infrastructure (read-only, no enforcement)
+  - Integration support for Porter trip data schema
+  - {_SUPPORT_DAYS}-day deployment and support program
+  - Runbooks: city expansion, retraining, secret rotation, backup
+  - CI/CD pipeline and 63-test validation suite
+  - Exclusivity: platform not sold to any other Indian logistics company for 24 months
 
-Phase 2: Asset Transfer (on validation)
-- Fee: {_ASSET_TRANSFER_FEE}
-- Includes: Source code, model weights, deployment package, runbooks, analyst training
-- Timeline: {_SUPPORT_DAYS}-day deployment program
-- Payment: Milestone-based tranches tied to execution, deployment progress, and handover completion
+TRANCHE 2 — {_TRANCHE_2_DISPLAY}
+Due: On validation success within {_VALIDATION_DAYS} days of signing. Non-refundable on success.
+Acceptance criteria (all five must be met):
+  1. Action-tier precision >= 70% on Porter's real trip data (min 30-day window)
+  2. Minimum 10,000 Porter trips scored
+  3. False positive rate <= 15% on Porter's real trip data
+  4. Platform processes Porter live trip webhook events without operational impact
+  5. Analyst workflow demonstrated on Porter real flagged cases
+
+If criteria not met: Tranche 2 is not due. Porter retains all transferred IP.
+Seller provides 30 additional days of remediation support at no charge.
 
 Notes
 - Device identity controls remain upstream with Incognia.
-- This platform is the trip intelligence layer focused on in-trip behavioral leakage.
-- Final commercial terms remain subject to legal review and execution.
+- This platform is the trip-intelligence layer: detects fraud by actors who pass identity controls.
+- Final terms subject to legal review and execution.
 """.strip()
 
 
@@ -292,32 +315,33 @@ def _build_commercial_schedule_pdf() -> bytes:
         Paragraph("2. Payment Schedule", S["h2"]),
         Table(
             [
-                ["Phase", "Fee (excl. GST)", "Deliverable", "Commercial Trigger"],
+                ["Tranche", "Amount (excl. GST)", "Timing", "Refundable"],
                 [
-                    "Phase 1 — Shadow Evaluation",
-                    _SHADOW_EVAL_FEE,
-                    "Read-only shadow run plus Porter validation report",
-                    "Executed evaluation order / NDA",
+                    "Tranche 1 — On signing",
+                    _TRANCHE_1_DISPLAY,
+                    "On execution of agreement",
+                    "No — non-refundable",
                 ],
                 [
-                    "Phase 2 — Asset Transfer",
-                    _ASSET_TRANSFER_FEE,
-                    "Source code, model weights, deployment package, runbooks, training",
-                    "Validation success and signed asset-transfer agreement",
+                    "Tranche 2 — On validation",
+                    _TRANCHE_2_DISPLAY,
+                    f"On validation success within {_VALIDATION_DAYS} days",
+                    "Not due if criteria unmet",
                 ],
                 [
-                    "Phase 2 payment structure",
-                    "Milestone-based tranches",
-                    f"{_SUPPORT_DAYS}-day deployment program and handover completion",
-                    "Deployment milestones and final sign-off",
+                    "Total",
+                    _TOTAL_DISPLAY,
+                    "",
+                    "",
                 ],
             ],
-            colWidths=[125, 110, 160, 115],
+            colWidths=[140, 130, 150, 90],
         ).setStyle(_table_style_default()),
         Spacer(1, 8),
         Paragraph(
-            "All amounts are exclusive of GST. GST at 18% is applicable. "
-            "Phase 1 is an exclusive evaluation engagement. Phase 2 proceeds only after validation success.",
+            "All amounts are exclusive of GST. GST at 18% is applicable where required. "
+            f"Tranche 1 transfers full IP immediately on signing. "
+            f"Tranche 2 is triggered only on validation success within {_VALIDATION_DAYS} days.",
             S["small"],
         ),
         Spacer(1, 12),
@@ -731,4 +755,165 @@ async def download_support_scope(
         content=pdf,
         media_type="application/pdf",
         headers={"Content-Disposition": 'attachment; filename="Deployment-and-Support-Scope.pdf"'},
+    )
+
+
+def _build_term_sheet_pdf() -> bytes:
+    buf = BytesIO()
+    doc = SimpleDocTemplate(buf, pagesize=A4,
+                            topMargin=50, bottomMargin=50,
+                            leftMargin=60, rightMargin=60)
+    S = _styles()
+    today = datetime.utcnow().strftime("%d %B %Y")
+    story = [
+        Paragraph("TERM SHEET — FOR DISCUSSION PURPOSES ONLY", S["h1"]),
+        HRFlowable(width="100%", thickness=2, color=colors.HexColor("#1a1a2e")),
+        Spacer(1, 6),
+        Paragraph(
+            f"Platform: {_PLATFORM_NAME} &nbsp;&nbsp;|&nbsp;&nbsp; "
+            f"Date: {today} &nbsp;&nbsp;|&nbsp;&nbsp; "
+            f"Not binding until executed by both parties.",
+            S["small"],
+        ),
+        Spacer(1, 14),
+
+        Paragraph("STRUCTURE", S["h2"]),
+        Paragraph("Two-tranche milestone acquisition.", S["body"]),
+        Table(
+            [
+                ["", "Amount", "Timing", "Refundable"],
+                ["Tranche 1", _TRANCHE_1_DISPLAY, "On signing", "No"],
+                ["Tranche 2", _TRANCHE_2_DISPLAY,
+                 f"On validation success within {_VALIDATION_DAYS} days", "N/A if unmet"],
+                ["Total", _TOTAL_DISPLAY, "", ""],
+            ],
+            colWidths=[80, 145, 165, 100],
+        ).setStyle(_table_style_default()),
+        Spacer(1, 12),
+
+        Paragraph(f"TRANCHE 1 — {_TRANCHE_1_DISPLAY} ON SIGNING", S["h2"]),
+        Paragraph("Non-refundable. Full IP transfer on payment.", S["bold"]),
+        Spacer(1, 4),
+        Paragraph("Includes:", S["body"]),
+        Table(
+            [
+                ["✓ Full source code transfer",
+                 "✓ Model weights + training pipeline"],
+                ["✓ AWS deployment package (already live)",
+                 "✓ Shadow mode on Porter infrastructure"],
+                ["✓ 90-day deployment support program",
+                 "✓ Schema integration for Porter trip data"],
+                ["✓ Analyst workflow + case management",
+                 "✓ Runbooks: operations, retraining, expansion"],
+                ["✓ CI/CD pipeline and 63-test suite",
+                 "✓ 24-month exclusivity (Indian logistics)"],
+            ],
+            colWidths=[240, 240],
+        ).setStyle(TableStyle([
+            ("FONTSIZE", (0, 0), (-1, -1), 9),
+            ("TOPPADDING", (0, 0), (-1, -1), 4),
+            ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
+        ])),
+        Spacer(1, 12),
+
+        Paragraph(f"TRANCHE 2 — {_TRANCHE_2_DISPLAY} ON VALIDATION", S["h2"]),
+        Paragraph(
+            f"Due within {_VALIDATION_DAYS} days of signing on meeting all five criteria. "
+            "Not due if criteria unmet. Porter retains all IP regardless.",
+            S["body"],
+        ),
+        Table(
+            [
+                ["#", "Acceptance Criterion", "Target"],
+                ["1", "Action-tier precision on Porter real trips", "≥ 70%"],
+                ["2", "Porter trips scored", "≥ 10,000"],
+                ["3", "False positive rate on Porter real trips", "≤ 15%"],
+                ["4", "Live webhook integration operational", "Zero impact"],
+                ["5", "Analyst workflow on real cases", "Demonstrated"],
+            ],
+            colWidths=[20, 290, 170],
+        ).setStyle(_table_style_default()),
+        Spacer(1, 8),
+        Paragraph(
+            "If criteria unmet: Tranche 2 not due. Porter retains all IP. "
+            "Seller provides 30 additional days remediation at no charge.",
+            S["small"],
+        ),
+        Spacer(1, 12),
+
+        Paragraph("WHY ₹1 CRORE ON SIGNING IS FAIR", S["h2"]),
+        Table(
+            [
+                ["Build internally", "Acquire this platform"],
+                ["3 ML engineers × 6 months: ₹75-90L salaries", "Working platform deployed today on AWS"],
+                ["Infrastructure setup: ₹15-20L", f"Validated on {_TOTAL_DISPLAY.split('(')[0].strip()} trips across 17 cities"],
+                ["No guaranteed precision outcome", "85.3% action-tier precision (twin validated)"],
+                ["Total: ₹90-110L minimum, 6+ months", "90-day support + full IP. Own it outright."],
+            ],
+            colWidths=[240, 240],
+        ).setStyle(TableStyle([
+            ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#1a1a2e")),
+            ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
+            ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+            ("FONTSIZE", (0, 0), (-1, -1), 9),
+            ("ROWBACKGROUNDS", (0, 1), (-1, -1),
+             [colors.HexColor("#f5f5f5"), colors.white]),
+            ("GRID", (0, 0), (-1, -1), 0.4, colors.HexColor("#cccccc")),
+            ("TOPPADDING", (0, 0), (-1, -1), 5),
+            ("BOTTOMPADDING", (0, 0), (-1, -1), 5),
+            ("LEFTPADDING", (0, 0), (-1, -1), 8),
+        ])),
+        Spacer(1, 12),
+
+        Paragraph("NEXT STEPS ON SIGNING", S["h2"]),
+        Table(
+            [
+                ["Day",  "Milestone"],
+                ["Day 1",  "IP transfer complete"],
+                ["Week 1", "Shadow mode deployed on Porter infrastructure"],
+                ["Week 2", "First Porter trips flowing through model"],
+                ["Week 4", "Initial precision / FPR report"],
+                ["Day 90", "Tranche 2 decision point"],
+            ],
+            colWidths=[80, 400],
+        ).setStyle(_table_style_default()),
+        Spacer(1, 20),
+
+        HRFlowable(width="100%", thickness=0.5, color=colors.HexColor("#aaaaaa")),
+        Spacer(1, 6),
+        Paragraph(
+            "DRAFT — For discussion purposes only. "
+            "Not binding until executed by both parties. Subject to legal review.",
+            S["footer"],
+        ),
+    ]
+    story += _sig_block(
+        _SELLER_ENTITY["name"],
+        signatory=_SELLER_ENTITY["signatory"],
+        designation="Founder",
+    )
+    story += _sig_block(_PORTER_BUYER)
+    doc.build(story, onFirstPage=_draw_footer, onLaterPages=_draw_footer)
+    return buf.getvalue()
+
+
+@router.get(
+    "/term-sheet",
+    summary="Download one-page term sheet PDF",
+    response_class=Response,
+)
+async def download_term_sheet(
+    user=Depends(require_permission("read:all")),
+):
+    """One-page term sheet for discussion — ₹1Cr + ₹2.25Cr structure."""
+    pdf = _build_term_sheet_pdf()
+    date_str = datetime.utcnow().strftime("%Y-%m-%d")
+    return Response(
+        content=pdf,
+        media_type="application/pdf",
+        headers={
+            "Content-Disposition": (
+                f'attachment; filename="Porter-Intelligence-Term-Sheet-{date_str}.pdf"'
+            )
+        },
     )

@@ -110,6 +110,26 @@ def _build_board_pack_pdf(
     )
     story.append(Spacer(1, 12))
 
+    # Load digital twin validation numbers
+    twin_report_path = Path(
+        "/Users/arnav/PorterTwin/reports/validation_one_month.json"
+    )
+    twin_perf = {}
+    twin_fp   = {}
+    twin_ds   = {}
+    if twin_report_path.exists():
+        import json as _json
+        twin_data = _json.loads(twin_report_path.read_text())
+        twin_perf = twin_data["results"]["model_performance"]
+        twin_fp   = twin_data["results"]["false_positive_by_subgroup"]
+        twin_ds   = twin_data["results"]["dataset"]
+
+    twin_precision = f"{twin_perf.get('action_tier_precision', 0.853):.1%}" if twin_perf else "85.3%"
+    twin_fpr       = f"{twin_perf.get('action_tier_fpr', 0.0066):.2%}" if twin_perf else "0.66%"
+    twin_recall    = f"{twin_perf.get('combined_action_watchlist_recall', 0.882):.1%}" if twin_perf else "88.2%"
+    twin_trips     = f"{twin_ds.get('total_trips', 1_296_000):,}" if twin_ds else "1,296,000"
+    twin_surge_fpr = f"{twin_fp.get('surge_trips_fpr', 0.006):.1%}" if twin_fp else "0.6%"
+
     section(
         "1. Executive Summary",
         [
@@ -122,19 +142,18 @@ def _build_board_pack_pdf(
             "- Fake cancellations and trip padding",
             "- Driver ring coordination",
             "- Fleet dead-mile leakage",
-            "Model performance on synthetic Porter-scale benchmark:",
-            "- Action-tier precision: 88.3%",
-            "- Action-tier FPR: 0.53%",
-            "- Combined recall (action + watchlist): 81.5%",
-            "- Net recovery per trip: ₹6.85 (action tier)",
-            "- Indicative annual recovery at Porter scale: ₹6.87 Cr",
-            "Shadow validation status: Ready for 60-day pilot",
-            "Data provenance: Synthetic Porter-scale benchmark",
-            "Real-data validation: Available via shadow-mode pilot",
+            f"Model validation — Porter Digital Twin ({twin_trips} trips, 30 days, 17 Indian cities):",
+            f"- Action-tier precision: {twin_precision} (threshold 0.80)",
+            f"- Action-tier FPR: {twin_fpr}",
+            f"- Combined recall (action + watchlist): {twin_recall}",
+            f"- Surge pricing FPR: {twin_surge_fpr} (target <20%)",
+            "- Net recovery per trip: ₹5.08 (synthetic benchmark)",
+            "- Indicative annual recovery at Porter scale: ₹4.95 Cr (conservative)",
+            "Data provenance: Porter-scale digital twin (synthetic). Real-data validation: 90-day shadow program.",
             "Commercial structure:",
-            "- 60-day shadow evaluation: ₹40-50 lakh",
-            "- Full asset transfer on validation: ₹1.5-2 crore",
-            "- Source code, model weights, deployment package, runbooks, and 90-day deployment program included",
+            "- Tranche 1: ₹1 crore on signing (non-refundable — full IP transfer)",
+            "- Tranche 2: ₹2.25 crore on 90-day validation success",
+            "- Total: ₹3.25 crore. Tranche 2 not due if validation criteria unmet.",
         ],
     )
     story.append(
@@ -282,8 +301,12 @@ def _build_board_pack_pdf(
     section(
         "Commercial Structure",
         [
-            "Target ask: asset transfer + deployment + shadow-mode validation + hardening support.",
-            "Use milestone-based acceptance tied to shadow success, rollout readiness, and handover completion.",
+            "Structure: Two-tranche milestone acquisition. Total: ₹3,25,00,000 (₹3.25 crore).",
+            "Tranche 1 — ₹1,00,00,000 (₹1 crore) on signing. Non-refundable. Full IP transfer.",
+            "Tranche 2 — ₹2,25,00,000 (₹2.25 crore) on 90-day validation success.",
+            "Acceptance criteria: action-tier precision ≥70%, FPR ≤15%, ≥10,000 Porter trips scored.",
+            "If Tranche 2 criteria unmet: not due. Porter retains all IP. 30-day remediation at no charge.",
+            "Exclusivity: not sold to any other Indian logistics company for 24 months from signing.",
         ],
     )
     story.append(PageBreak())

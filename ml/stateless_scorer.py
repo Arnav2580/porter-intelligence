@@ -71,7 +71,11 @@ def build_feature_vector(
     base_fare = veh.base_fare if veh else 50
     per_km    = veh.per_km_rate if veh else 15
     expected  = base_fare + per_km * distance
-    fare_ratio = fare / max(expected, 1.0)
+    # Surge-adjusted: matches features.py formula
+    # Clean surge trip: fare = expected * surge → ratio ≈ 1.0
+    # Fraud trip: fare >> expected * surge → ratio > 1.5
+    surge_adj_expected = max(expected, 1.0) * max(surge, 1.0)
+    fare_ratio = fare / max(surge_adj_expected, 1.0)
 
     # Derived ratios matching FEATURE_COLUMNS names exactly
     distance_time_ratio   = distance / duration           # km/min
