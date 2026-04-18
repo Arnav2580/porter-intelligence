@@ -38,6 +38,7 @@ app = FastAPI(
     version=API_VERSION,
     description=API_DESCRIPTION,
     lifespan=lifespan,
+    redirect_slashes=False,
     openapi_tags=[
         {
             "name": "platform",

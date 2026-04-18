@@ -503,13 +503,27 @@ function CaseQueue({ onSelectCase }) {
       </div>
 
       <div className="queue-metrics-grid">
-        <QueueMetric label="Queue Size" value={cases.length} tone="neutral" subtext="Visible cases in current analyst scope" />
-        <QueueMetric label="Selected" value={selectedIds.length} tone="warning" subtext="Ready for batch action" />
+        <QueueMetric
+          label="Queue Size"
+          value={cases.length || (counts.open ?? 0)}
+          tone="neutral"
+          subtext="Visible cases in current analyst scope"
+        />
+        <QueueMetric
+          label="Selected"
+          value={selectedIds.length}
+          tone="warning"
+          subtext={selectedIds.length > 0 ? 'Ready for batch action' : 'Pick cases to act on'}
+        />
         <QueueMetric
           label="Oldest Pending"
-          value={displayed.length ? `${Math.max(...displayed.map((caseItem) => caseItem.case_age_hours || 0)).toFixed(1)}h` : '0h'}
+          value={
+            displayed.length
+              ? `${Math.max(...displayed.map((caseItem) => caseItem.case_age_hours || 0)).toFixed(1)}h`
+              : '--'
+          }
           tone="danger"
-          subtext="Use this to keep SLAs honest"
+          subtext={displayed.length ? 'Use this to keep SLAs honest' : 'Queue is empty'}
         />
       </div>
 
@@ -733,7 +747,7 @@ function CaseDetail({ selectedCase, onBack, onOpenDriver, onOpenCase }) {
       const detailPromise = apiGet(`/cases/${selectedCase.id}`);
       const historyPromise = apiGet(`/cases/${selectedCase.id}/history`).catch(() => ({ history: [] }));
       const relatedPromise = apiGet(
-        `/cases/?tier=${encodeURIComponent(selectedCase.tier)}&zone_id=${encodeURIComponent(selectedCase.zone_id)}&limit=6`,
+        `/cases?tier=${encodeURIComponent(selectedCase.tier)}&zone_id=${encodeURIComponent(selectedCase.zone_id)}&limit=6`,
       ).catch(() => ({ cases: [] }));
       const driverPromise = selectedCase.driver_id
         ? apiGet(`/intelligence/driver/${encodeURIComponent(selectedCase.driver_id)}`).catch((driverError) => ({
@@ -1251,7 +1265,12 @@ function ManagerView() {
         <QueueMetric label="Open Queue" value={queue.open_cases ?? 0} tone="neutral" subtext="Cases awaiting first analyst decision" />
         <QueueMetric label="Reviewed 24h" value={throughput.reviewed_cases ?? 0} tone="warning" subtext="Confirmed + false alarm outcomes" />
         <QueueMetric label="Precision 24h" value={`${((throughput.reviewed_case_precision || 0) * 100).toFixed(1)}%`} tone="success" subtext="Reviewed-case precision only" />
-        <QueueMetric label="Confirmed Recovery" value={formatInr(liveKpi?.confirmed_recoverable_inr_24h)} tone="danger" subtext={liveKpi?.review_confidence_label || 'Awaiting review depth'} />
+        <QueueMetric
+          label="Confirmed Recovery"
+          value={formatInr(liveKpi?.confirmed_recoverable_inr_24h ?? throughput.confirmed_recoverable_inr)}
+          tone="danger"
+          subtext={liveKpi?.review_confidence_label || `${throughput.confirmed_cases || 0} confirmed · 24h window`}
+        />
       </div>
 
       <div className="detail-cols">
