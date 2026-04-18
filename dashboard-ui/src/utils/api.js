@@ -1,16 +1,16 @@
-const envBaseUrl = (import.meta.env.VITE_API_BASE_URL || '').trim()
-const browserHost = typeof window !== 'undefined'
-  ? window.location.hostname
-  : 'localhost'
-const isLocalBrowser = ['localhost', '127.0.0.1'].includes(browserHost)
-const BASE_URL = envBaseUrl || '/api'
+const BASE_URL = (import.meta.env.VITE_API_BASE_URL || '').trim() || '/api'
 
 const getToken = () =>
   sessionStorage.getItem('porter_token')
 
+const PROXY_HEADERS = {
+  'ngrok-skip-browser-warning': 'true',
+}
+
 export async function apiGet(path) {
   const res = await fetch(`${BASE_URL}${path}`, {
     headers: {
+      ...PROXY_HEADERS,
       'Authorization': `Bearer ${getToken()}`
     }
   })
@@ -26,6 +26,7 @@ export async function apiPost(path, body) {
   const res = await fetch(`${BASE_URL}${path}`, {
     method: 'POST',
     headers: {
+      ...PROXY_HEADERS,
       'Content-Type': 'application/json',
       'Authorization': `Bearer ${getToken()}`
     },
@@ -42,7 +43,10 @@ export async function apiPost(path, body) {
 export async function apiFormPost(path, formData) {
   const res = await fetch(`${BASE_URL}${path}`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    headers: {
+      ...PROXY_HEADERS,
+      'Content-Type': 'application/x-www-form-urlencoded'
+    },
     body: formData,
   })
   if (!res.ok) {
@@ -54,7 +58,8 @@ export async function apiFormPost(path, formData) {
 
 export async function apiGetRaw(path) {
   const res = await fetch(`${BASE_URL}${path}`, {
-    signal: AbortSignal.timeout(10000)
+    headers: { ...PROXY_HEADERS },
+    signal: AbortSignal.timeout(15000)
   })
   return res
 }
@@ -63,6 +68,7 @@ export async function apiPatch(path, body) {
   const res = await fetch(`${BASE_URL}${path}`, {
     method: 'PATCH',
     headers: {
+      ...PROXY_HEADERS,
       'Content-Type': 'application/json',
       'Authorization': `Bearer ${getToken()}`
     },
