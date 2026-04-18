@@ -1026,8 +1026,15 @@ function CaseDetail({ selectedCase, onBack, onOpenDriver, onOpenCase }) {
   );
 }
 
+const DEMO_DRIVERS = [
+  { id: 'DRV_RING_001', label: 'Ring Leader (Critical)' },
+  { id: 'DRV_RING_002', label: 'Ring Member (Mumbai)' },
+  { id: 'DRV_HIGH_001', label: 'High Risk Solo' },
+  { id: 'DRV_WATCH_001', label: 'Watchlist Driver' },
+];
+
 function DriverProfile({ initialDriverId }) {
-  const [driverId, setDriverId] = useState(initialDriverId || '');
+  const [driverId, setDriverId] = useState(initialDriverId || 'DRV_RING_001');
   const [profile, setProfile] = useState(null);
   const [loading, setLoading] = useState(false);
 
@@ -1045,10 +1052,9 @@ function DriverProfile({ initialDriverId }) {
   }, []);
 
   useEffect(() => {
-    if (initialDriverId) {
-      setDriverId(initialDriverId);
-      loadProfile(initialDriverId);
-    }
+    const idToUse = initialDriverId || 'DRV_RING_001';
+    setDriverId(idToUse);
+    loadProfile(idToUse);
   }, [initialDriverId, loadProfile]);
 
   const peerMetrics = Object.entries(profile?.peer_comparison?.metrics || {});
@@ -1060,6 +1066,23 @@ function DriverProfile({ initialDriverId }) {
           <div className="page-title">Driver Profile</div>
           <div className="page-subtitle">Review a driver outside the case queue.</div>
         </div>
+      </div>
+
+      <div style={{ display: 'flex', gap: 8, marginBottom: 12, flexWrap: 'wrap' }}>
+        {DEMO_DRIVERS.map((d) => (
+          <button
+            key={d.id}
+            onClick={() => { setDriverId(d.id); loadProfile(d.id); }}
+            style={{
+              padding: '4px 10px', fontSize: 11,
+              background: driverId === d.id ? 'rgba(255,107,53,0.2)' : 'rgba(255,107,53,0.07)',
+              border: `1px solid ${driverId === d.id ? 'rgba(255,107,53,0.4)' : 'rgba(255,107,53,0.2)'}`,
+              borderRadius: 4, color: 'var(--orange)', cursor: 'pointer',
+            }}
+          >
+            {d.label}
+          </button>
+        ))}
       </div>
 
       <div className="driver-search-bar">
