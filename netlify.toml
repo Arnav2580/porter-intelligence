@@ -2,6 +2,7 @@
 base = "dashboard-ui"
 publish = "dist"
 command = "npm run build"
+edge_functions = "netlify/edge-functions"
 
 [build.environment]
 # Set VITE_API_BASE_URL in Netlify when the API is hosted on a different

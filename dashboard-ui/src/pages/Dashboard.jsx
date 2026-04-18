@@ -83,18 +83,13 @@ export default function Dashboard() {
     return <OfflineScreen onRetry={() => { setApiStatus('checking'); doHealthCheck(); }} />;
   }
 
-  const syntheticFeedEnabled = Boolean(
-    healthMeta?.synthetic_feed_enabled
-  );
+  const syntheticFeedEnabled = Boolean(healthMeta?.synthetic_feed_enabled);
   const runtimeMode = healthMeta?.runtime_mode ?? 'unknown';
+  const isDbAvailable = healthMeta?.database !== 'unavailable';
   const modeLabel = syntheticFeedEnabled
-    ? 'DEMO MODE'
-    : runtimeMode === 'prod'
-      ? 'PRODUCTION MODE'
-      : 'SHADOW MODE';
-  const modeColor = syntheticFeedEnabled
-    ? 'var(--warning)'
-    : 'var(--success)';
+    ? 'DEMO'
+    : runtimeMode === 'prod' ? 'PRODUCTION' : 'SHADOW';
+  const modeColor = syntheticFeedEnabled ? 'var(--warning)' : 'var(--success)';
 
   return (
     <>
@@ -118,13 +113,29 @@ export default function Dashboard() {
             </div>
           )}
           {healthMeta && (
-            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 4 }}>
-              <div className="live-badge" style={{ color: modeColor }}>
-                <div className="live-dot" style={{ background: modeColor, animation: syntheticFeedEnabled ? 'pulse-dot 2s infinite' : 'none' }} />
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              {!isDbAvailable && (
+                <div style={{
+                  fontSize: 10,
+                  color: 'rgba(255,180,0,0.7)',
+                  background: 'rgba(255,180,0,0.08)',
+                  padding: '3px 8px',
+                  borderRadius: 4,
+                  border: '1px solid rgba(255,180,0,0.2)',
+                }}>
+                  ⚡ Demo mode · DB offline · Benchmark data
+                </div>
+              )}
+              <div style={{
+                fontSize: 9,
+                background: 'rgba(59,130,246,0.15)',
+                color: 'rgba(59,130,246,0.8)',
+                padding: '2px 6px',
+                borderRadius: 3,
+                border: '1px solid rgba(59,130,246,0.2)',
+                letterSpacing: '0.05em',
+              }}>
                 {modeLabel}
-              </div>
-              <div style={{ fontSize: 10, color: 'var(--muted)', maxWidth: 240, textAlign: 'right', lineHeight: 1.4 }}>
-                {healthMeta.data_provenance}
               </div>
             </div>
           )}

@@ -30,6 +30,12 @@ export default function Login() {
     }
   }
 
+  const DEMO_CREDS = [
+    { label: 'Analyst', username: 'analyst_1', password: 'DemoAnalyst2026!' },
+    { label: 'Ops Manager', username: 'ops_manager', password: 'DemoOps2026!' },
+    { label: 'Admin', username: 'admin', password: 'DemoAdmin2026!' },
+  ];
+
   return (
     <div className="login-screen">
       <div className="login-card">
@@ -76,6 +82,36 @@ export default function Login() {
             {loading ? 'Signing in…' : 'Sign In'}
           </button>
         </form>
+
+        <div style={{
+          marginTop: 24,
+          padding: '12px 16px',
+          background: 'rgba(255,255,255,0.05)',
+          border: '1px solid rgba(255,255,255,0.1)',
+          borderRadius: 8,
+          fontSize: 12,
+          color: 'var(--muted)',
+        }}>
+          <div style={{ fontWeight: 600, marginBottom: 8, color: 'var(--text)' }}>
+            Demo Credentials
+          </div>
+          {DEMO_CREDS.map(cred => (
+            <div
+              key={cred.username}
+              style={{
+                marginBottom: 4, cursor: 'pointer', padding: '4px 6px',
+                borderRadius: 4, transition: 'background 0.15s',
+              }}
+              onClick={() => { setUsername(cred.username); setPassword(cred.password); }}
+              onMouseEnter={e => e.currentTarget.style.background = 'rgba(255,255,255,0.07)'}
+              onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
+            >
+              <strong style={{ color: 'var(--text)' }}>{cred.label}:</strong>{' '}
+              {cred.username} / {cred.password}
+            </div>
+          ))}
+          <div style={{ marginTop: 8, fontSize: 11 }}>Click any row to auto-fill</div>
+        </div>
       </div>
     </div>
   );

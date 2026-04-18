@@ -3,7 +3,7 @@ const browserHost = typeof window !== 'undefined'
   ? window.location.hostname
   : 'localhost'
 const isLocalBrowser = ['localhost', '127.0.0.1'].includes(browserHost)
-const BASE_URL = envBaseUrl || (isLocalBrowser ? 'http://localhost:8000' : '')
+const BASE_URL = envBaseUrl || '/api'
 
 const getToken = () =>
   sessionStorage.getItem('porter_token')
@@ -54,7 +54,7 @@ export async function apiFormPost(path, formData) {
 
 export async function apiGetRaw(path) {
   const res = await fetch(`${BASE_URL}${path}`, {
-    signal: AbortSignal.timeout(3000)
+    signal: AbortSignal.timeout(10000)
   })
   return res
 }
