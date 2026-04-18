@@ -53,7 +53,7 @@ export default function FraudFeed({ thresholds }) {
 
   useEffect(() => {
     fetchFeed();
-    const t = setInterval(fetchFeed, 10000);
+    const t = setInterval(fetchFeed, 3000);
     return () => clearInterval(t);
   }, [fetchFeed]);
 
@@ -69,7 +69,7 @@ export default function FraudFeed({ thresholds }) {
   const feedLabelColor = isBenchmark ? 'var(--warning)' : 'var(--success)';
   const feedSubLabel  = isBenchmark
     ? '100k-trip evaluation set · start simulator for live feed'
-    : `Refreshes every 10s · Showing ${items.length} cases`;
+    : `Refreshes every 3s · Showing ${items.length} cases`;
 
   return (
     <div className="col feed-col" style={{ padding: 0 }}>

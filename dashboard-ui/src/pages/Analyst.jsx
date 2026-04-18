@@ -134,6 +134,7 @@ function Header({
     { id: 'detail', label: 'Case Detail' },
     { id: 'driver', label: 'Driver Profile' },
     { id: 'manager', label: 'Manager View' },
+    ...(user.role === 'admin' ? [{ id: 'users', label: 'Users' }] : []),
   ];
   const modeLabel = runtimeMeta?.synthetic_feed_enabled
     ? 'DEMO MODE'
@@ -1287,6 +1288,116 @@ function ManagerView() {
   );
 }
 
+const ROLE_LABELS = {
+  admin:        'Admin',
+  ops_manager:  'Ops Manager',
+  ops_analyst:  'Analyst',
+  read_only:    'Read Only',
+};
+
+function UserManagement() {
+  const [users, setUsers] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
+
+  useEffect(() => {
+    apiGet('/auth/admin/users')
+      .then(d => { setUsers(d.users || []); setLoading(false); })
+      .catch(e => { setError(e.message); setLoading(false); });
+  }, []);
+
+  return (
+    <div className="fade-in">
+      <div className="page-header">
+        <div>
+          <div className="page-title">Platform Users</div>
+          <div className="page-subtitle">
+            Users are managed via environment variables. Set
+            {' '}<code style={{ fontFamily: 'var(--font-mono)', color: 'var(--orange)', fontSize: 11 }}>PORTER_AUTH_&#123;USERNAME&#125;_PASSWORD</code>
+            {' '}and redeploy to add a user.
+          </div>
+        </div>
+      </div>
+
+      {loading && <div className="loading"><div className="spinner" /> Loading users...</div>}
+      {error && <div style={{ color: 'var(--danger)', padding: 16, fontSize: 12 }}>{error}</div>}
+
+      {!loading && !error && (
+        <div style={{ maxWidth: 640 }}>
+          <div style={{
+            display: 'grid',
+            gridTemplateColumns: '1fr 1fr auto',
+            gap: '0 16px',
+            padding: '8px 16px',
+            fontSize: 10,
+            color: 'var(--muted)',
+            textTransform: 'uppercase',
+            letterSpacing: '0.06em',
+            borderBottom: '1px solid var(--border)',
+            marginBottom: 4,
+          }}>
+            <span>Username</span><span>Role</span><span>Status</span>
+          </div>
+
+          {users.map(u => (
+            <div key={u.username} style={{
+              display: 'grid',
+              gridTemplateColumns: '1fr 1fr auto',
+              gap: '0 16px',
+              padding: '12px 16px',
+              borderBottom: '1px solid rgba(46,46,74,0.4)',
+              alignItems: 'center',
+            }}>
+              <span style={{ fontFamily: 'var(--font-mono)', fontSize: 13, color: 'var(--text)' }}>
+                {u.username}
+              </span>
+              <span style={{
+                fontSize: 11,
+                padding: '2px 8px',
+                borderRadius: 4,
+                display: 'inline-block',
+                background: u.role === 'admin' ? 'rgba(255,107,53,0.1)' : 'rgba(255,255,255,0.05)',
+                color: u.role === 'admin' ? 'var(--orange)' : 'var(--muted)',
+                fontWeight: 600,
+                letterSpacing: '0.04em',
+              }}>
+                {ROLE_LABELS[u.role] || u.role}
+              </span>
+              <span style={{
+                display: 'flex', alignItems: 'center', gap: 5,
+                fontSize: 11, color: 'var(--success)',
+              }}>
+                <div style={{ width: 6, height: 6, borderRadius: '50%', background: 'var(--success)' }} />
+                Active
+              </span>
+            </div>
+          ))}
+
+          <div style={{
+            marginTop: 24,
+            padding: '14px 16px',
+            background: 'rgba(255,255,255,0.02)',
+            border: '1px solid var(--border)',
+            borderRadius: 8,
+            fontSize: 12,
+            color: 'var(--muted)',
+            lineHeight: 1.7,
+          }}>
+            <div style={{ fontWeight: 700, color: 'var(--text)', marginBottom: 6, fontSize: 11 }}>
+              To add a user:
+            </div>
+            <div style={{ fontFamily: 'var(--font-mono)', fontSize: 11 }}>
+              1. Add <span style={{ color: 'var(--orange)' }}>PORTER_AUTH_&#123;USERNAME&#125;_PASSWORD</span> to your environment<br />
+              2. Restart the API service<br />
+              3. User can log in immediately — no code changes needed
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 export default function Analyst() {
   const { auth, logout } = useAuth();
   const navigate = useNavigate();
@@ -1377,6 +1488,7 @@ export default function Analyst() {
         ) : null}
         {activeTab === 'driver' ? <DriverProfile initialDriverId={selectedDriverId} /> : null}
         {activeTab === 'manager' ? <ManagerView /> : null}
+        {activeTab === 'users' ? <UserManagement /> : null}
       </div>
     </>
   );

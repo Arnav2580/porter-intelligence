@@ -4,8 +4,8 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.security import OAuth2PasswordRequestForm
 
 from api.limiting import limiter
-from auth.config import get_seed_user
-from auth.dependencies import get_current_user
+from auth.config import get_seed_user, SEED_USER_SPECS
+from auth.dependencies import get_current_user, require_permission
 from auth.jwt import (
     create_access_token,
     verify_password,
@@ -71,4 +71,45 @@ async def get_me(
         "username": user["sub"],
         "role": user["role"],
         "name": user["name"],
+    }
+
+
+@router.get("/admin/users", tags=["auth"])
+async def list_users(
+    user=Depends(require_permission("write:all")),
+):
+    """List all platform users. Admin only."""
+    users = []
+    for username, spec in SEED_USER_SPECS.items():
+        users.append({
+            "username": spec.username,
+            "role": spec.role.value,
+            "name": spec.name,
+            "env_var": spec.env_var,
+            "active": True,
+        })
+    return {"users": users, "count": len(users)}
+
+
+@router.post("/admin/users", tags=["auth"])
+async def create_user(
+    username: str,
+    role: str,
+    user=Depends(require_permission("write:all")),
+):
+    """Instructions for adding a new platform user. Admin only."""
+    env_var = f"PORTER_AUTH_{username.upper()}_PASSWORD"
+    return {
+        "message": (
+            f"To add user '{username}', set env var "
+            f"{env_var} and redeploy the service."
+        ),
+        "username": username,
+        "role": role,
+        "env_var": env_var,
+        "steps": [
+            f"1. Add {env_var}=<password> to your .env",
+            "2. Restart the API service",
+            "3. User can log in immediately",
+        ],
     }

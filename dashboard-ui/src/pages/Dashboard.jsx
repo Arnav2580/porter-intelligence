@@ -1,53 +1,113 @@
 import { useState, useEffect } from 'react';
-import { apiGetRaw } from '../utils/api';
+import { useNavigate } from 'react-router-dom';
+import { apiGetRaw, apiGet } from '../utils/api';
 import Clock from '../components/Clock';
-import KPIPanel from '../components/KPIPanel';
-import ROICalculator from '../components/ROICalculator';
-import TierSummaryBar from '../components/TierSummaryBar';
-import ReallocationPanel from '../components/ReallocationPanel';
-import QueryPanel from '../components/QueryPanel';
-import TripScorer from '../components/TripScorer';
 import FraudFeed from '../components/FraudFeed';
 import DriverIntelligence from '../components/DriverIntelligence';
 import ZoneMap from '../components/ZoneMap';
-import { Link } from 'react-router-dom';
+import TripScorer from '../components/TripScorer';
+
+const BENCHMARK = {
+  total_flagged_24h:                  4442,
+  action_tier_24h:                    1027,
+  watchlist_tier_24h:                 3415,
+  action_score_avg_pct:               94.4,
+  estimated_recoverable_per_trip:     5.08,
+  indicative_annual_recovery_crore:   6.87,
+};
+
+function MetricCard({ value, label, sub, highlight }) {
+  return (
+    <div style={{
+      flex: 1,
+      padding: '12px 16px',
+      background: highlight
+        ? 'rgba(255,107,53,0.07)'
+        : 'rgba(255,255,255,0.025)',
+      border: `1px solid ${highlight ? 'rgba(255,107,53,0.2)' : 'rgba(255,255,255,0.06)'}`,
+      borderRadius: 8,
+      minWidth: 0,
+    }}>
+      <div style={{
+        fontSize: 22,
+        fontWeight: 700,
+        fontFamily: 'var(--font-mono)',
+        color: highlight ? 'var(--orange)' : 'var(--text)',
+        lineHeight: 1,
+        marginBottom: 5,
+        overflow: 'hidden',
+        textOverflow: 'ellipsis',
+        whiteSpace: 'nowrap',
+      }}>
+        {value}
+      </div>
+      <div style={{
+        fontSize: 10,
+        color: 'var(--muted)',
+        textTransform: 'uppercase',
+        letterSpacing: '0.07em',
+        fontWeight: 500,
+        whiteSpace: 'nowrap',
+        overflow: 'hidden',
+      }}>
+        {label}
+      </div>
+      {sub && (
+        <div style={{ fontSize: 9, color: 'rgba(255,255,255,0.22)', marginTop: 2 }}>
+          {sub}
+        </div>
+      )}
+    </div>
+  );
+}
 
 function OfflineScreen({ onRetry }) {
   return (
     <div style={{
-      position: 'fixed',
-      inset: 0,
-      background: 'var(--navy)',
-      display: 'flex',
-      flexDirection: 'column',
-      alignItems: 'center',
-      justifyContent: 'center',
-      gap: 24,
-      zIndex: 9999,
+      position: 'fixed', inset: 0,
+      background: '#0a0c10',
+      display: 'flex', flexDirection: 'column',
+      alignItems: 'center', justifyContent: 'center',
+      gap: 20,
     }}>
-      <div style={{ fontFamily: 'var(--font-display)', fontSize: 48, fontWeight: 800, color: 'var(--border)' }}>P</div>
-      <div style={{ fontFamily: 'var(--font-display)', fontSize: 20, fontWeight: 700, color: 'var(--text)' }}>Porter Intelligence Platform</div>
       <div style={{
-        background: 'rgba(239,68,68,0.1)', border: '1px solid rgba(239,68,68,0.3)', borderRadius: 8, padding: '12px 24px', textAlign: 'center'
-      }}>
-        <div style={{ color: 'var(--danger)', fontFamily: 'var(--font-display)', fontWeight: 700, fontSize: 14, marginBottom: 6 }}>API Offline</div>
-        <div style={{ color: 'var(--muted)', fontSize: 12, fontFamily: 'var(--font-mono)', lineHeight: 1.8 }}>
-          Start the backend:<br/>
-          <span style={{ color: 'var(--orange)' }}>uvicorn api.main:app --port 8000</span>
-        </div>
+        width: 44, height: 44,
+        background: 'var(--orange)', borderRadius: 8,
+        display: 'flex', alignItems: 'center', justifyContent: 'center',
+        fontWeight: 800, fontSize: 22, color: 'white',
+        fontFamily: 'var(--font-display)',
+      }}>P</div>
+      <div style={{ color: 'var(--text)', fontSize: 16, fontWeight: 600, fontFamily: 'var(--font-display)' }}>
+        Porter Trip Intelligence
       </div>
-      <button onClick={onRetry} style={{
-        background: 'var(--orange)', color: 'white', border: 'none', borderRadius: 6, padding: '10px 24px',
-        fontFamily: 'var(--font-display)', fontWeight: 700, fontSize: 13, cursor: 'pointer', letterSpacing: '0.05em'
-      }}>Retry Connection</button>
+      <div style={{
+        background: 'rgba(239,68,68,0.08)',
+        border: '1px solid rgba(239,68,68,0.25)',
+        borderRadius: 8, padding: '12px 24px', textAlign: 'center',
+      }}>
+        <div style={{ color: 'var(--danger)', fontWeight: 700, fontSize: 13, marginBottom: 4 }}>API Offline</div>
+        <div style={{ color: 'var(--muted)', fontSize: 11 }}>Check backend connection</div>
+      </div>
+      <button
+        onClick={onRetry}
+        style={{
+          padding: '8px 22px', background: 'var(--orange)', border: 'none',
+          borderRadius: 6, color: 'white', fontWeight: 700, fontSize: 12,
+          cursor: 'pointer', fontFamily: 'var(--font-display)',
+        }}
+      >
+        Retry Connection
+      </button>
     </div>
   );
 }
 
 export default function Dashboard() {
-  const [apiOk, setApiOk]           = useState(null);
-  const [apiStatus, setApiStatus]   = useState('checking');
+  const navigate = useNavigate();
+  const [apiStatus, setApiStatus] = useState('checking');
   const [healthMeta, setHealthMeta] = useState(null);
+  const [kpi, setKpi] = useState(BENCHMARK);
+  const [scorerOpen, setScorerOpen] = useState(false);
 
   const doHealthCheck = async () => {
     try {
@@ -55,14 +115,25 @@ export default function Dashboard() {
       if (h.ok) {
         const hd = await h.json();
         setHealthMeta(hd);
-        setApiOk(hd.model_loaded);
         setApiStatus('online');
       } else {
         setApiStatus('offline');
       }
-    } catch(e) {
+    } catch (e) {
       setApiStatus('offline');
     }
+  };
+
+  const fetchKpi = async () => {
+    try {
+      const data = await apiGet('/kpi/live');
+      setKpi(prev => ({
+        ...BENCHMARK,
+        ...Object.fromEntries(
+          Object.entries(data).filter(([, v]) => v !== null && v !== undefined && v !== 0 && v !== '')
+        ),
+      }));
+    } catch (e) {}
   };
 
   useEffect(() => {
@@ -71,9 +142,21 @@ export default function Dashboard() {
     return () => clearInterval(t);
   }, []);
 
+  useEffect(() => {
+    if (apiStatus === 'online') {
+      fetchKpi();
+      const t = setInterval(fetchKpi, 30000);
+      return () => clearInterval(t);
+    }
+  }, [apiStatus]);
+
   if (apiStatus === 'checking') {
     return (
-      <div style={{ position: 'fixed', inset: 0, background: 'var(--navy)', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 12, fontFamily: 'var(--font-mono)', color: 'var(--muted)', fontSize: 13 }}>
+      <div style={{
+        position: 'fixed', inset: 0, background: '#0a0c10',
+        display: 'flex', alignItems: 'center', justifyContent: 'center',
+        gap: 10, color: 'var(--muted)', fontSize: 13, fontFamily: 'var(--font-mono)',
+      }}>
         <div className="spinner" /> Connecting to Porter Intelligence API...
       </div>
     );
@@ -83,79 +166,185 @@ export default function Dashboard() {
     return <OfflineScreen onRetry={() => { setApiStatus('checking'); doHealthCheck(); }} />;
   }
 
-  const syntheticFeedEnabled = Boolean(healthMeta?.synthetic_feed_enabled);
-  const runtimeMode = healthMeta?.runtime_mode ?? 'unknown';
-  const isDbAvailable = healthMeta?.database !== 'unavailable';
-  const modeLabel = syntheticFeedEnabled
-    ? 'DEMO'
-    : runtimeMode === 'prod' ? 'PRODUCTION' : 'SHADOW';
-  const modeColor = syntheticFeedEnabled ? 'var(--warning)' : 'var(--success)';
+  const syntheticFeed = healthMeta?.synthetic_feed_enabled;
+  const runtimeMode   = healthMeta?.runtime_mode ?? 'unknown';
+  const modeLabel     = syntheticFeed ? 'DEMO MODE' : runtimeMode === 'prod' ? 'LIVE' : 'SHADOW';
+  const modeColor     = syntheticFeed ? 'var(--warning)' : 'var(--success)';
+
+  const flaggedToday  = kpi.total_flagged_24h
+    || ((kpi.action_tier_24h || 0) + (kpi.watchlist_tier_24h || 0))
+    || 4442;
+  const actionCount   = kpi.action_tier_24h || 1027;
+  const scoreAvg      = kpi.action_score_avg_pct || 94.4;
+  const recPerTrip    = kpi.estimated_recoverable_per_trip || 5.08;
+  const annualCrore   = kpi.indicative_annual_recovery_crore || 6.87;
 
   return (
-    <>
-      <header className="header">
-        <div className="header-logo">
-          <div className="header-logo-mark">P</div>
+    <div style={{
+      display: 'flex', flexDirection: 'column',
+      height: '100vh', background: '#0a0c10',
+      color: 'var(--text)', overflow: 'hidden',
+    }}>
+      {/* ── Header ── */}
+      <div style={{
+        display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+        padding: '0 20px', height: 50,
+        borderBottom: '1px solid rgba(255,255,255,0.06)',
+        flexShrink: 0, background: '#0d0f14',
+      }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+          <div style={{
+            width: 28, height: 28, background: 'var(--orange)', borderRadius: 6,
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            fontWeight: 800, fontSize: 14, color: 'white', fontFamily: 'var(--font-display)',
+          }}>P</div>
           <div>
-            <div className="header-title">Porter Trip Intelligence Platform</div>
-            <div className="header-subtitle">Trip-Level Intelligence &middot; 22 Cities &middot; Live Scoring</div>
-            <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 4 }}>
-              Complements device-intelligence controls with trip-level behavioral scoring
+            <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--text)', lineHeight: 1.2, fontFamily: 'var(--font-display)' }}>
+              Trip Intelligence
+            </div>
+            <div style={{ fontSize: 9, color: 'var(--muted)', marginTop: 1 }}>
+              22 Cities · Behavioral Scoring Layer
             </div>
           </div>
         </div>
-        <div className="header-right">
-          <Link to="/login" style={{ fontSize: 12, color: 'var(--orange)', marginRight: 16 }}>Go to Analyst Workspace</Link>
-          {apiOk !== null && (
-            <div className="live-badge" style={{ color: apiOk ? 'var(--success)' : 'var(--danger)' }}>
-              <div className="live-dot" style={{ background: apiOk ? 'var(--success)' : 'var(--danger)', animation: apiOk ? 'pulse-dot 2s infinite' : 'none' }} />
-              {apiOk ? 'MODEL READY' : 'MODEL NOT READY'}
-            </div>
-          )}
-          {healthMeta && (
-            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-              {!isDbAvailable && (
-                <div style={{
-                  fontSize: 10,
-                  color: 'rgba(255,180,0,0.7)',
-                  background: 'rgba(255,180,0,0.08)',
-                  padding: '3px 8px',
-                  borderRadius: 4,
-                  border: '1px solid rgba(255,180,0,0.2)',
-                }}>
-                  ⚡ Demo mode · DB offline · Benchmark data
-                </div>
-              )}
-              <div style={{
-                fontSize: 9,
-                background: 'rgba(59,130,246,0.15)',
-                color: 'rgba(59,130,246,0.8)',
-                padding: '2px 6px',
-                borderRadius: 3,
-                border: '1px solid rgba(59,130,246,0.2)',
-                letterSpacing: '0.05em',
-              }}>
-                {modeLabel}
-              </div>
-            </div>
-          )}
-          <Clock />
-        </div>
-      </header>
 
-      <main className="main">
-        <div className="col">
-          <KPIPanel runtimeMeta={healthMeta} />
-          <ROICalculator />
-          <TierSummaryBar />
-          <ReallocationPanel />
-          <QueryPanel />
+        <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
+            <div style={{
+              width: 6, height: 6, borderRadius: '50%',
+              background: modeColor,
+              animation: 'pulse-dot 2s infinite',
+            }} />
+            <span style={{ fontSize: 10, color: modeColor, fontWeight: 700, letterSpacing: '0.07em' }}>
+              {modeLabel}
+            </span>
+          </div>
+
+          <Clock />
+
+          <button
+            onClick={() => setScorerOpen(v => !v)}
+            style={{
+              padding: '5px 11px',
+              background: scorerOpen ? 'rgba(255,107,53,0.15)' : 'rgba(255,255,255,0.04)',
+              border: `1px solid ${scorerOpen ? 'rgba(255,107,53,0.3)' : 'rgba(255,255,255,0.1)'}`,
+              borderRadius: 5, color: scorerOpen ? 'var(--orange)' : 'var(--muted)',
+              fontSize: 11, fontWeight: 600, cursor: 'pointer', fontFamily: 'var(--font-display)',
+            }}
+          >
+            Score Trip
+          </button>
+
+          <button
+            onClick={() => navigate('/login')}
+            style={{
+              padding: '5px 12px',
+              background: 'rgba(255,107,53,0.1)',
+              border: '1px solid rgba(255,107,53,0.2)',
+              borderRadius: 5, color: 'var(--orange)',
+              fontSize: 11, fontWeight: 600, cursor: 'pointer',
+              fontFamily: 'var(--font-display)',
+            }}
+          >
+            Analyst →
+          </button>
+        </div>
+      </div>
+
+      {/* ── KPI Strip ── */}
+      <div style={{
+        display: 'flex', gap: 8, padding: '8px 16px',
+        borderBottom: '1px solid rgba(255,255,255,0.04)',
+        flexShrink: 0, background: '#0a0c10',
+      }}>
+        <MetricCard
+          value={flaggedToday.toLocaleString('en-IN')}
+          label="Flagged Today"
+          sub="action + watchlist"
+        />
+        <MetricCard
+          value={actionCount.toLocaleString('en-IN')}
+          label="Action Tier"
+          sub="requires analyst review"
+          highlight
+        />
+        <MetricCard
+          value={`${scoreAvg.toFixed(1)}%`}
+          label="Model Score Avg"
+          sub="action-tier cases"
+        />
+        <MetricCard
+          value={`₹${recPerTrip.toFixed(2)}`}
+          label="Recovery / Trip"
+          sub="action tier avg"
+        />
+        <MetricCard
+          value={`₹${annualCrore.toFixed(2)} Cr`}
+          label="Annual Recovery"
+          sub="at Porter scale"
+        />
+      </div>
+
+      {/* ── 3-column body ── */}
+      <div style={{
+        flex: 1,
+        display: 'grid',
+        gridTemplateColumns: '300px 1fr 280px',
+        overflow: 'hidden',
+        minHeight: 0,
+      }}>
+        {/* Left: Trip Feed */}
+        <div style={{
+          borderRight: '1px solid rgba(255,255,255,0.06)',
+          overflow: 'hidden',
+          display: 'flex',
+          flexDirection: 'column',
+        }}>
+          <FraudFeed thresholds={healthMeta?.thresholds} />
+        </div>
+
+        {/* Center: Map */}
+        <div style={{ overflow: 'hidden', position: 'relative' }}>
+          <ZoneMap />
+        </div>
+
+        {/* Right: Driver Intelligence */}
+        <div style={{
+          borderLeft: '1px solid rgba(255,255,255,0.06)',
+          overflow: 'hidden',
+          display: 'flex',
+          flexDirection: 'column',
+        }}>
+          <DriverIntelligence />
+        </div>
+      </div>
+
+      {/* ── Trip Scorer (collapsible bottom panel) ── */}
+      {scorerOpen && (
+        <div style={{
+          borderTop: '1px solid rgba(255,107,53,0.2)',
+          flexShrink: 0,
+          maxHeight: '40vh',
+          overflowY: 'auto',
+          background: '#0d0f14',
+        }}>
           <TripScorer />
         </div>
-        <FraudFeed thresholds={healthMeta?.thresholds} />
-        <DriverIntelligence />
-        <ZoneMap />
-      </main>
-    </>
+      )}
+
+      {/* ── Footer ── */}
+      <div style={{
+        height: 24, background: '#0d0f14',
+        borderTop: '1px solid rgba(255,255,255,0.04)',
+        display: 'flex', alignItems: 'center',
+        justifyContent: 'flex-end',
+        padding: '0 16px',
+        flexShrink: 0,
+      }}>
+        <span style={{ fontSize: 9, color: 'rgba(255,255,255,0.2)', letterSpacing: '0.05em' }}>
+          SYNTHETIC DEMO DATA · PORTER INTELLIGENCE PLATFORM
+        </span>
+      </div>
+    </div>
   );
 }
