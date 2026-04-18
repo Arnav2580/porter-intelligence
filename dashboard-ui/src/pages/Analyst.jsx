@@ -381,7 +381,7 @@ function CaseQueue({ onSelectCase }) {
       if (filterZone) params.set('zone_id', filterZone);
 
       const [caseData, countData] = await Promise.all([
-        apiGet(`/cases/?${params}`),
+        apiGet(`/cases?${params}`),
         apiGet('/cases/summary/counts').catch(() => ({})),
       ]);
 

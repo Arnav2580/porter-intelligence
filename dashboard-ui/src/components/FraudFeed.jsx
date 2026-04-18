@@ -29,10 +29,85 @@ const ZONE_LABELS = {
   del_gurgaon:         'Gurgaon',
 };
 
+function TripPopup({ trip, tier, onClose }) {
+  const tierColor = tier === 'action' ? '#ef4444' : '#f59e0b';
+  return (
+    <div
+      onClick={onClose}
+      style={{
+        position: 'fixed', inset: 0,
+        background: 'rgba(0,0,0,0.72)',
+        display: 'flex', alignItems: 'center', justifyContent: 'center',
+        zIndex: 9999,
+      }}
+    >
+      <div
+        onClick={e => e.stopPropagation()}
+        style={{
+          background: '#13141e',
+          border: '1px solid rgba(255,255,255,0.08)',
+          borderRadius: 12, padding: 24, width: 460, maxWidth: '92vw',
+        }}
+      >
+        <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 16, alignItems: 'flex-start' }}>
+          <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+            <span style={{
+              padding: '3px 9px', borderRadius: 4, fontSize: 11, fontWeight: 700,
+              background: `${tierColor}22`, color: tierColor,
+            }}>{tier?.toUpperCase()}</span>
+            <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--text)' }}>
+              {(trip.fraud_type || 'Unknown').replace(/_/g, ' ')}
+            </span>
+          </div>
+          <button onClick={onClose} style={{
+            background: 'none', border: 'none', color: 'var(--muted)',
+            cursor: 'pointer', fontSize: 20, lineHeight: 1, padding: '0 4px',
+          }}>×</button>
+        </div>
+
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px 16px', marginBottom: 16 }}>
+          {[
+            ['Trip ID',      trip.trip_id   || '--'],
+            ['Driver',       trip.driver_id || '--'],
+            ['Zone',         trip.zone_id   || '--'],
+            ['Fare',         `₹${(trip.fare_inr || 0).toFixed(0)}`],
+            ['Recoverable',  `+₹${(trip.recoverable || 0).toFixed(0)}`],
+            ['Confidence',   `${((trip.confidence || 0) * 100).toFixed(0)}%`],
+          ].map(([label, val]) => (
+            <div key={label}>
+              <div style={{ fontSize: 9, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 3 }}>{label}</div>
+              <div style={{ fontSize: 12, fontFamily: 'var(--font-mono)', color: 'var(--text)', wordBreak: 'break-all' }}>{val}</div>
+            </div>
+          ))}
+        </div>
+
+        <div style={{ display: 'flex', gap: 8, paddingTop: 14, borderTop: '1px solid rgba(255,255,255,0.06)' }}>
+          <button onClick={onClose} style={{
+            flex: 1, padding: '7px 0',
+            background: 'rgba(239,68,68,0.1)', border: '1px solid rgba(239,68,68,0.2)',
+            borderRadius: 5, color: '#ef4444', fontSize: 11, fontWeight: 600, cursor: 'pointer',
+          }}>Confirm Fraud</button>
+          <button onClick={onClose} style={{
+            flex: 1, padding: '7px 0',
+            background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.08)',
+            borderRadius: 5, color: 'var(--muted)', fontSize: 11, cursor: 'pointer',
+          }}>Dismiss</button>
+          <button onClick={onClose} style={{
+            flex: 1, padding: '7px 0',
+            background: 'rgba(245,158,11,0.1)', border: '1px solid rgba(245,158,11,0.2)',
+            borderRadius: 5, color: '#f59e0b', fontSize: 11, fontWeight: 600, cursor: 'pointer',
+          }}>View in Queue →</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export default function FraudFeed({ thresholds }) {
   const [items, setItems]             = useState([]);
   const [isBenchmark, setIsBenchmark] = useState(true);
   const [error, setError]             = useState(false);
+  const [selectedTrip, setSelectedTrip] = useState(null);
   const listRef = useRef(null);
 
   // Read tier thresholds from props (passed from health endpoint) or fall back to
@@ -114,7 +189,7 @@ export default function FraudFeed({ thresholds }) {
         {items.map((item, i) => {
           const tier = tierOf(item.confidence);
           return (
-            <div key={item.trip_id + i} className="feed-item">
+            <div key={item.trip_id + i} className="feed-item" onClick={() => setSelectedTrip(item)} style={{ cursor: 'pointer' }}>
               <div className="feed-item-top">
                 <div className="feed-fraud-type">
                   {FRAUD_TYPE_LABELS[item.fraud_type] || item.fraud_type}
@@ -143,6 +218,13 @@ export default function FraudFeed({ thresholds }) {
           );
         })}
       </div>
+      {selectedTrip && (
+        <TripPopup
+          trip={selectedTrip}
+          tier={tierOf(selectedTrip.confidence)}
+          onClose={() => setSelectedTrip(null)}
+        />
+      )}
     </div>
   );
 }

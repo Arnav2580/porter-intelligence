@@ -31,9 +31,10 @@ export default function ZoneMap() {
   useEffect(() => {
     const fetchHeatmap = async () => {
       try {
+        // fleet-zones has 35 zones / 12 cities vs dead-miles 24 zones / 3 cities
         const endpoint = mapMode === 'fraud'
           ? '/fraud/heatmap'
-          : '/efficiency/dead-miles';
+          : '/efficiency/fleet-zones';
 
         const data = await apiGet(endpoint);
         setError(false);
@@ -48,9 +49,13 @@ export default function ZoneMap() {
         const bounds = [];
 
         data.zones.forEach(zone => {
+          // fleet-zones: dead_mile_pct is 0-100; dead-miles: dead_mile_rate is 0-1
+          const deadMileRate = zone.dead_mile_rate ?? (zone.dead_mile_pct ?? 0) / 100;
+          const zoneName     = zone.zone_name ?? zone.city ?? zone.zone_id;
+
           const value = mapMode === 'fraud'
             ? zone.fraud_rate
-            : (1 - (zone.dead_mile_rate || 0));
+            : (1 - deadMileRate);
 
           const color = mapMode === 'fraud'
             ? (zone.risk_level === 'CRITICAL' ? '#EF4444' :
@@ -69,19 +74,23 @@ export default function ZoneMap() {
             { radius, color, fillColor: color, fillOpacity: 0.25, weight: 1.5, opacity: 0.7 }
           ).addTo(map);
 
+          const fleetDetail = zone.active_drivers != null
+            ? `Active: ${zone.active_drivers} · Idle: ${zone.idle_drivers}`
+            : `Cost/day: ₹${(zone.cost_inr_per_day || 0).toFixed(0)}`;
+
           const popupContent = mapMode === 'fraud'
             ? `Fraud rate: <span style="color:${color};font-weight:700">${(zone.fraud_rate*100).toFixed(1)}%</span><br>
                Cases: ${zone.fraud_count}<br>
                Risk: <span style="color:${color};font-weight:700">${zone.risk_level}</span>`
             : `Efficiency: <span style="color:${color};font-weight:700">${(value*100).toFixed(1)}%</span><br>
-               Dead miles: ${((1-value)*100).toFixed(1)}%<br>
-               Cost/day: ₹${(zone.cost_inr_per_day||0).toFixed(0)}`;
+               Dead miles: ${(deadMileRate*100).toFixed(1)}%<br>
+               ${fleetDetail}`;
 
           circle.bindPopup(`
             <div style="font-family:'DM Mono',monospace;background:#242438;color:#F0F0FF;
                         border:1px solid #2E2E4A;border-radius:8px;padding:12px;min-width:160px">
               <div style="font-family:'Syne',sans-serif;font-weight:700;font-size:14px;margin-bottom:6px">
-                ${zone.zone_name}
+                ${zoneName}
               </div>
               <div style="font-size:11px;color:#8888AA">${popupContent}</div>
             </div>
