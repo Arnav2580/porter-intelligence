@@ -2,9 +2,11 @@
 
 import asyncio
 import logging
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 from typing import Optional
 from datetime import datetime, timezone
+
+from auth.dependencies import require_permission
 
 logger = logging.getLogger(__name__)
 router = APIRouter(tags=["route_efficiency"])
@@ -115,7 +117,9 @@ async def _get_efficiency_snapshot(trips_df):
 
 
 @router.get("/efficiency/summary")
-async def efficiency_summary():
+async def efficiency_summary(
+    _user=Depends(require_permission("read:cases")),
+):
     """
     Fleet-wide efficiency KPIs.
     Dead mile rate, utilisation, reallocation opportunity.
@@ -139,12 +143,16 @@ async def efficiency_summary():
         cache["utilisation"],
         cache["suggestions"],
     )
+    summary.setdefault("data_source", "synthetic_benchmark")
 
     return summary
 
 
 @router.get("/efficiency/reallocation")
-async def reallocation_suggestions(limit: int = 8):
+async def reallocation_suggestions(
+    limit: int = 8,
+    _user=Depends(require_permission("read:cases")),
+):
     """
     Ranked vehicle reallocation suggestions.
     Sorted by expected revenue descending.
@@ -171,7 +179,9 @@ async def reallocation_suggestions(limit: int = 8):
 
 
 @router.get("/efficiency/dead-miles")
-async def dead_mile_heatmap():
+async def dead_mile_heatmap(
+    _user=Depends(require_permission("read:cases")),
+):
     """
     Per-zone dead mile rates for map overlay.
     Used by the dashboard map toggle.
@@ -217,7 +227,10 @@ async def dead_mile_heatmap():
 
 
 @router.get("/efficiency/utilisation/{zone_id}")
-async def zone_utilisation(zone_id: str):
+async def zone_utilisation(
+    zone_id: str,
+    _user=Depends(require_permission("read:cases")),
+):
     """
     Hourly utilisation breakdown for a specific zone.
     Shows active vs idle by vehicle type per hour.
@@ -272,7 +285,9 @@ async def zone_utilisation(zone_id: str):
 
 
 @router.get("/efficiency/fleet-zones")
-async def fleet_zones():
+async def fleet_zones(
+    _user=Depends(require_permission("read:cases")),
+):
     """
     Fleet efficiency and utilisation data by zone for map display.
     Returns all active zones with idle/active driver counts and dead-mile %.

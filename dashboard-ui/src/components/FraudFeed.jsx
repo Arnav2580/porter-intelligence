@@ -112,8 +112,8 @@ export default function FraudFeed({ thresholds }) {
 
   // Read tier thresholds from props (passed from health endpoint) or fall back to
   // config defaults. Never hardcode thresholds in the frontend.
-  const actionThreshold    = thresholds?.action_threshold    ?? 0.94;
-  const watchlistThreshold = thresholds?.watchlist_threshold ?? 0.45;
+  const actionThreshold    = thresholds?.action_threshold    ?? 0.80;
+  const watchlistThreshold = thresholds?.watchlist_threshold ?? 0.50;
 
   const fetchFeed = useCallback(async () => {
     try {
@@ -121,15 +121,23 @@ export default function FraudFeed({ thresholds }) {
       setItems(data.items || []);
       setIsBenchmark(data.is_benchmark !== false);
       setError(false);
-    } catch(e) {
+    } catch {
       setError(true);
     }
   }, []);
 
   useEffect(() => {
-    fetchFeed();
-    const t = setInterval(fetchFeed, 3000);
-    return () => clearInterval(t);
+    let cancelled = false;
+    const tick = async () => {
+      if (cancelled) return;
+      await fetchFeed();
+    };
+    tick();
+    const t = setInterval(tick, 3000);
+    return () => {
+      cancelled = true;
+      clearInterval(t);
+    };
   }, [fetchFeed]);
 
   const tierOf = (confidence) =>

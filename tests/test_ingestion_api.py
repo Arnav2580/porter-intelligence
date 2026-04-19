@@ -5,7 +5,12 @@ from pathlib import Path
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
+from auth.dependencies import get_current_user
 from ingestion.webhook import router as ingest_router
+
+
+async def _fake_admin_user():
+    return {"sub": "tester", "role": "admin", "name": "Test Admin"}
 
 
 def test_batch_csv_endpoint_accepts_sample(monkeypatch):
@@ -37,6 +42,7 @@ def test_batch_csv_endpoint_accepts_sample(monkeypatch):
 
     app = FastAPI()
     app.include_router(ingest_router)
+    app.dependency_overrides[get_current_user] = _fake_admin_user
 
     with TestClient(app) as client:
         with sample_path.open("rb") as handle:
@@ -61,6 +67,7 @@ def test_batch_csv_endpoint_accepts_sample(monkeypatch):
 def test_default_schema_map_endpoint_exposes_aliases():
     app = FastAPI()
     app.include_router(ingest_router)
+    app.dependency_overrides[get_current_user] = _fake_admin_user
 
     with TestClient(app) as client:
         response = client.get("/ingest/schema-map/default")

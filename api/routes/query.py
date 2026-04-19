@@ -1,8 +1,10 @@
 """Query endpoint for natural language ops queries."""
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
 from pydantic import BaseModel
 from typing import Optional
+
+from auth.dependencies import require_permission
 
 router = APIRouter(tags=["query"])
 
@@ -20,7 +22,10 @@ class QueryResponse(BaseModel):
 
 
 @router.post("/query", response_model=QueryResponse)
-async def natural_language_query(request: QueryRequest):
+async def natural_language_query(
+    request: QueryRequest,
+    _user=Depends(require_permission("read:cases")),
+):
     """
     Answer natural language questions about fraud, cases, and operations data.
 

@@ -74,7 +74,9 @@ def _benchmark_heatmap_fallback() -> HeatmapResponse:
     "/fraud/heatmap",
     response_model=HeatmapResponse,
 )
-async def fraud_heatmap():
+async def fraud_heatmap(
+    _user=Depends(require_permission("read:cases")),
+):
     """
     Zone-level fraud rate heatmap for the live map.
     Returns fraud rate per zone with risk classification.
@@ -179,7 +181,10 @@ async def fraud_heatmap():
     "/fraud/live-feed",
     response_model=LiveFeedResponse,
 )
-async def fraud_live_feed(limit: int = 50):
+async def fraud_live_feed(
+    limit: int = 50,
+    _user=Depends(require_permission("read:cases")),
+):
     """
     Fraud-flagged trip feed.
 
@@ -259,7 +264,10 @@ async def fraud_live_feed(limit: int = 50):
     "/fraud/driver/{driver_id}",
     response_model=DriverRiskResponse,
 )
-async def driver_risk(driver_id: str):
+async def driver_risk(
+    driver_id: str,
+    _user=Depends(require_permission("read:cases")),
+):
     """
     Risk profile for a specific driver.
     Used for drill-down in the dashboard.
@@ -330,7 +338,10 @@ async def driver_risk(driver_id: str):
 
 
 @router.get("/demand/forecast/{zone_id}")
-async def demand_forecast(zone_id: str):
+async def demand_forecast(
+    zone_id: str,
+    _user=Depends(require_permission("read:cases")),
+):
     """
     Next 24-hour demand forecast for a zone.
     Uses Prophet ML model if available, falls back to rule-based.
@@ -408,7 +419,9 @@ async def demand_forecast(zone_id: str):
     "/kpi/summary",
     response_model=KPISummaryResponse,
 )
-async def kpi_summary():
+async def kpi_summary(
+    _user=Depends(require_permission("read:cases")),
+):
     """
     Evaluation benchmark summary used by management and buyer review.
     """
@@ -472,7 +485,9 @@ async def kpi_summary():
 
 
 @router.get("/kpi/report")
-async def kpi_report():
+async def kpi_report(
+    _user=Depends(require_permission("read:cases")),
+):
     """Sanitized evaluation report for buyer-safe inspection."""
     report = app_state.get("report", {})
     if not report:
@@ -860,7 +875,10 @@ async def score_trip(
             trip_dict=trip_dict,
         )
 
-    # Persist to database if action or watchlist
+    # Persist to database if action or watchlist.
+    # Action-tier failure is FAIL-CLOSED: we MUST have a durable record before
+    # firing enforcement, otherwise we can suspend a driver with no audit trail.
+    # Watchlist-tier failure is logged but tolerated (read-only review queue).
     if tier.name in ("action", "watchlist"):
         try:
             await persist_flagged_case(
@@ -881,6 +899,14 @@ async def score_trip(
                 body.trip_id,
                 exc,
             )
+            if tier.name == "action":
+                raise HTTPException(
+                    status_code=503,
+                    detail=(
+                        "Action-tier persistence failed; refusing to dispatch "
+                        "enforcement without an audit record. Please retry."
+                    ),
+                ) from exc
 
     # Emit Prometheus counter
     try:
@@ -954,7 +980,9 @@ async def score_trip(
 
 
 @router.get("/fraud/tier-summary")
-async def fraud_tier_summary():
+async def fraud_tier_summary(
+    _user=Depends(require_permission("read:cases")),
+):
     """
     Two-stage scoring tier summary.
     Returns per-tier metrics and combined system performance.

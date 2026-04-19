@@ -1,18 +1,12 @@
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
 import { getToken, setToken, clearToken, getRole, getName, isAuthenticated } from '../utils/auth';
 
 export function useAuth() {
-  const [auth, setAuthState] = useState(null);
-
-  useEffect(() => {
-    if (isAuthenticated()) {
-      setAuthState({
-        token: getToken(),
-        role: getRole(),
-        name: getName(),
-      });
-    }
-  }, []);
+  const [auth, setAuthState] = useState(() =>
+    isAuthenticated()
+      ? { token: getToken(), role: getRole(), name: getName() }
+      : null,
+  );
 
   const login = (token, role, name) => {
     setToken(token, role, name);

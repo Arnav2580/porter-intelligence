@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 
 from api.schemas import (
     ROICalculationRequest,
@@ -13,6 +13,7 @@ from api.schemas import (
     ROIScenario,
 )
 from api.state import app_state
+from auth.dependencies import require_permission
 from config.commercial import COMMERCIAL
 
 router = APIRouter(prefix="/roi", tags=["roi"])
@@ -213,15 +214,17 @@ def roi_summary(
     trips_per_day:      int   = 43200,
     fraud_rate_pct:     float = 5.9,
     action_tier_pct:    float = 3.77,
-    action_precision:   float = 0.883,
-    recovery_per_trip:  float = 6.85,
+    action_precision:   float = 0.853,
+    recovery_per_trip:  float = 5.08,
     platform_cost_lakh: float = 75.0,
+    _user=Depends(require_permission("read:cases")),
 ):
     """
     GET /roi/summary — quick ROI snapshot with conservative defaults.
 
-    All inputs are based on the synthetic benchmark dataset.
-    Real-data FPR and precision are validated during the shadow pilot.
+    All inputs are based on the synthetic benchmark dataset
+    (data/raw/evaluation_report.json, XGBoost row, threshold 0.80).
+    Real-data FPR and precision are validated during the 90-day shadow pilot.
     """
     from datetime import datetime
 
@@ -231,11 +234,13 @@ def roi_summary(
     true_positives_annual  = flagged_annual * action_precision
     false_positives_annual = flagged_annual * (1 - action_precision)
 
-    RECOVERY_RATE   = 0.30    # conservative: 30% of flagged fraud recoverable
-    REVIEW_COST_INR = 50      # ₹50 ops cost per analyst review
-    gross_recovery  = true_positives_annual * recovery_per_trip
-    net_recovery    = gross_recovery * RECOVERY_RATE
-    ops_cost_annual = (true_positives_annual + false_positives_annual) * REVIEW_COST_INR
+    REALIZATION_RATE = 0.50   # 50% haircut: benchmark→production realisation
+    REVIEW_COST_INR  = 50     # ₹50 ops cost per analyst review
+    # recovery_per_trip is benchmark net_recoverable_per_trip (₹/trip across all trips,
+    # already net of false-alarm refund cost — see evaluation_report.json:xgboost).
+    gross_recovery     = annual_trips * recovery_per_trip
+    net_recovery       = gross_recovery * REALIZATION_RATE
+    ops_cost_annual    = (true_positives_annual + false_positives_annual) * REVIEW_COST_INR
     net_annual_benefit = net_recovery - ops_cost_annual
 
     platform_cost_inr = platform_cost_lakh * 100_000
@@ -280,11 +285,12 @@ def roi_summary(
         },
         "disclosures": [
             "All inputs based on synthetic benchmark data (100K trips, 5.9% fraud rate)",
-            "action_precision=88.3% applies to action tier (threshold 0.65) only — top ~3.8% of trips by risk score",
-            "overall model precision at threshold 0.40 (watchlist) is lower; two-stage system uses 0.65 for enforcement",
-            "Real-data FPR and precision validated during 60-day shadow pilot",
-            "Recovery rate (30%) is conservative — actual depends on Porter enforcement process",
-            "Net recovery goes negative if action-tier FPR on real data exceeds ~15%",
+            "action_precision=85.3% applies to action tier (threshold 0.80) only — top ~3.8% of trips by risk score",
+            "overall model precision at threshold 0.50 (watchlist) is lower; two-stage system uses 0.80 for enforcement",
+            "Real-data FPR and precision validated during 90-day shadow pilot",
+            "Realization rate (50%) is conservative — actual depends on Porter enforcement process",
+            "recovery_per_trip is benchmark net_recoverable_per_trip (already net of false-alarm refund cost)",
+            "Net benefit goes negative if action-tier FPR on real data exceeds ~20% sustained",
         ],
         "shadow_pilot_value": (
             f"The {COMMERCIAL.validation_days}-day validation program runs on real trip data in shadow mode. "

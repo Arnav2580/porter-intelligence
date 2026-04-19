@@ -4,7 +4,6 @@ import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 
 export default function ZoneMap() {
-  const mapRef      = useRef(null);
   const leafletRef  = useRef(null);
   const markersRef  = useRef([]);
   const [mapMode, setMapMode] = useState('fraud');
@@ -106,7 +105,7 @@ export default function ZoneMap() {
         }
 
         setZoneCount(bounds.length);
-      } catch(e) {
+      } catch {
         setError(true);
       }
     };

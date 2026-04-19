@@ -9,7 +9,9 @@ Buyer-facing rule:
 - proxy metrics must never be presented as final fraud precision/FPR
 
 Registered as GET /kpi/live in api/main.py.
-No auth required — same as /kpi/summary (read-only aggregate, no PII).
+Auth required — read:cases. The aggregate is buyer-sensitive
+because it surfaces reviewed-case quality and operational metrics
+that should not be public.
 """
 
 from datetime import datetime, timedelta, timezone
@@ -19,6 +21,7 @@ from sqlalchemy import func, select, and_
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from api.state import app_state
+from auth.dependencies import require_permission
 from database.connection import get_db
 from database.models import FraudCase, FraudCaseStatus
 from runtime_config import describe_data_provenance
@@ -128,7 +131,10 @@ def _infra_unavailable_fallback(now: datetime) -> dict:
 
 
 @router.get("/kpi/live")
-async def kpi_live(db: AsyncSession = Depends(get_db)):
+async def kpi_live(
+    db: AsyncSession = Depends(get_db),
+    _user=Depends(require_permission("read:cases")),
+):
     """
     Live KPI numbers computed from PostgreSQL fraud_cases in real time.
 

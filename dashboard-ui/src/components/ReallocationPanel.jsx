@@ -15,8 +15,7 @@ export default function ReallocationPanel() {
         ]);
         setSuggestions(sugData.suggestions || []);
         setSummary(sumData);
-      } catch(e) {
-      } finally {
+      } catch { /* keep prior data */ } finally {
         setLoading(false);
       }
     };

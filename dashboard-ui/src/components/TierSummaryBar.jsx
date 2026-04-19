@@ -9,7 +9,7 @@ export default function TierSummaryBar() {
       try {
         const data = await apiGet('/fraud/tier-summary');
         setTierData(data);
-      } catch(e) {}
+      } catch { /* keep prior tier data */ }
     };
     fetchTiers();
     const t = setInterval(fetchTiers, 60000);

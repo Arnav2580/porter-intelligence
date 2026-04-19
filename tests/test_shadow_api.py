@@ -4,7 +4,12 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from api.routes.shadow import router as shadow_router
+from auth.dependencies import get_current_user
 from database.connection import get_db
+
+
+async def _fake_admin_user():
+    return {"sub": "tester", "role": "admin", "name": "Test Admin"}
 
 
 class _FakeSession:
@@ -24,6 +29,7 @@ def test_shadow_status_endpoint_reports_safe_mode(monkeypatch):
     app = FastAPI()
     app.include_router(shadow_router)
     app.dependency_overrides[get_db] = fake_get_db
+    app.dependency_overrides[get_current_user] = _fake_admin_user
 
     with TestClient(app) as client:
         response = client.get("/shadow/status")

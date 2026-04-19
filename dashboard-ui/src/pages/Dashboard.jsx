@@ -119,7 +119,7 @@ export default function Dashboard() {
       } else {
         setApiStatus('offline');
       }
-    } catch (e) {
+    } catch {
       setApiStatus('offline');
     }
   };
@@ -127,27 +127,36 @@ export default function Dashboard() {
   const fetchKpi = async () => {
     try {
       const data = await apiGet('/kpi/live');
-      setKpi(prev => ({
+      setKpi({
         ...BENCHMARK,
         ...Object.fromEntries(
           Object.entries(data).filter(([, v]) => v !== null && v !== undefined && v !== 0 && v !== '')
         ),
-      }));
-    } catch (e) {}
+      });
+    } catch { /* keep prior KPI snapshot */ }
   };
 
   useEffect(() => {
-    doHealthCheck();
-    const t = setInterval(doHealthCheck, 30000);
-    return () => clearInterval(t);
+    let cancelled = false;
+    const tick = async () => {
+      if (cancelled) return;
+      await doHealthCheck();
+    };
+    tick();
+    const t = setInterval(tick, 30000);
+    return () => { cancelled = true; clearInterval(t); };
   }, []);
 
   useEffect(() => {
-    if (apiStatus === 'online') {
-      fetchKpi();
-      const t = setInterval(fetchKpi, 30000);
-      return () => clearInterval(t);
-    }
+    if (apiStatus !== 'online') return;
+    let cancelled = false;
+    const tick = async () => {
+      if (cancelled) return;
+      await fetchKpi();
+    };
+    tick();
+    const t = setInterval(tick, 30000);
+    return () => { cancelled = true; clearInterval(t); };
   }, [apiStatus]);
 
   if (apiStatus === 'checking') {

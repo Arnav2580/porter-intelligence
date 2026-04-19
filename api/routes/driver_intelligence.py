@@ -3,8 +3,10 @@
 import asyncio
 import logging
 import pandas as pd
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 from typing import List, Optional
+
+from auth.dependencies import require_permission
 
 logger = logging.getLogger(__name__)
 router = APIRouter(tags=["intelligence"])
@@ -283,7 +285,10 @@ async def _get_top_risk_cache(
 
 
 @router.get("/intelligence/driver/{driver_id}")
-async def driver_intelligence_profile(driver_id: str):
+async def driver_intelligence_profile(
+    driver_id: str,
+    _user=Depends(require_permission("read:cases")),
+):
     """
     Full intelligence profile for a specific driver.
     Includes 30-day risk timeline, peer comparison,
@@ -320,6 +325,7 @@ async def top_risk_drivers(
     limit: int = 10,
     zone_id: Optional[str] = None,
     action_filter: Optional[str] = None,
+    _user=Depends(require_permission("read:cases")),
 ):
     """
     Returns the top N highest-risk drivers.

@@ -14,7 +14,7 @@ export default function DriverIntelligence() {
         const data = await apiGet('/intelligence/top-risk?limit=15');
         setTopDrivers(data.drivers || []);
         setSummary(data.summary || null);
-      } catch(e) {}
+      } catch { /* fall back to last known good state */ }
     };
     fetchTop();
     const t = setInterval(fetchTop, 30000);

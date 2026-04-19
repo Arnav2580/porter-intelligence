@@ -13,7 +13,7 @@ that can be remapped through the schema mapper.
 """
 
 from fastapi import (
-    APIRouter, BackgroundTasks,
+    APIRouter, BackgroundTasks, Depends,
     File, Form, HTTPException, Header, Request, UploadFile
 )
 import csv
@@ -27,12 +27,16 @@ import logging
 import os
 
 from api.limiting import limiter
+from auth.dependencies import require_permission
 from security.settings import (
     get_rate_limit,
     get_required_secret,
     is_placeholder_value,
     require_webhook_signature,
 )
+
+MAX_BATCH_CSV_BYTES = 10 * 1024 * 1024   # 10 MB
+MAX_BATCH_CSV_ROWS  = 10_000
 
 logger = logging.getLogger(__name__)
 
@@ -334,28 +338,69 @@ async def ingest_batch_csv(
     file: UploadFile = File(...),
     mapping_file: Optional[UploadFile] = File(None),
     mapping_name: str = Form("default"),
+    _user=Depends(require_permission("write:all")),
 ):
-    """Accept a CSV upload, map rows, and queue them for scoring."""
+    """Accept a CSV upload, map rows, and queue them for scoring.
+
+    Limits: file <= 10 MB, <= 10,000 rows, content-type/.csv extension.
+    All malformed-input failures return 4xx, never 500.
+    """
     from ingestion.schema_mapper import SchemaMapper
+
+    filename = (file.filename or "").lower()
+    if not filename.endswith(".csv"):
+        raise HTTPException(
+            status_code=415,
+            detail="Only .csv files are accepted",
+        )
 
     raw_csv = await file.read()
     if not raw_csv:
         raise HTTPException(status_code=400, detail="Uploaded CSV is empty")
-
-    if mapping_file is not None:
-        mapper = SchemaMapper.from_json_bytes(
-            await mapping_file.read(),
-            mapping_name=mapping_name or "uploaded",
+    if len(raw_csv) > MAX_BATCH_CSV_BYTES:
+        raise HTTPException(
+            status_code=413,
+            detail=(
+                f"CSV exceeds {MAX_BATCH_CSV_BYTES // (1024 * 1024)} MB limit "
+                f"(got {len(raw_csv) // 1024} KB)"
+            ),
         )
-    else:
-        mapper = SchemaMapper.from_file(mapping_name=mapping_name)
 
-    text = raw_csv.decode("utf-8")
+    try:
+        if mapping_file is not None:
+            mapper = SchemaMapper.from_json_bytes(
+                await mapping_file.read(),
+                mapping_name=mapping_name or "uploaded",
+            )
+        else:
+            mapper = SchemaMapper.from_file(mapping_name=mapping_name)
+    except (ValueError, OSError, json.JSONDecodeError) as exc:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid mapping file: {exc}",
+        ) from exc
+
+    try:
+        text = raw_csv.decode("utf-8")
+    except UnicodeDecodeError as exc:
+        raise HTTPException(
+            status_code=400,
+            detail=f"CSV must be UTF-8 encoded: {exc}",
+        ) from exc
+
     rows = list(csv.DictReader(io.StringIO(text)))
     if not rows:
         raise HTTPException(
             status_code=400,
             detail="CSV contains no data rows",
+        )
+    if len(rows) > MAX_BATCH_CSV_ROWS:
+        raise HTTPException(
+            status_code=413,
+            detail=(
+                f"CSV exceeds {MAX_BATCH_CSV_ROWS} row limit "
+                f"(got {len(rows)} rows)"
+            ),
         )
 
     try:
@@ -376,7 +421,9 @@ async def ingest_batch_csv(
 
 
 @router.get("/status")
-async def ingestion_status():
+async def ingestion_status(
+    _user=Depends(require_permission("read:cases")),
+):
     """
     Ingestion pipeline status.
     Shows whether the webhook is configured
@@ -401,7 +448,9 @@ async def ingestion_status():
 
 
 @router.get("/schema-map/default")
-async def default_schema_map():
+async def default_schema_map(
+    _user=Depends(require_permission("read:cases")),
+):
     """Expose the default alias map so live mapping can be shown quickly."""
     from ingestion.schema_mapper import DEFAULT_SCHEMA_MAP_PATH
 

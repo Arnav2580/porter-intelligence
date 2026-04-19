@@ -1454,7 +1454,7 @@ export default function Analyst() {
       try {
         const health = await apiGet('/health');
         setRuntimeMeta(health);
-      } catch (_error) {
+      } catch {
         setRuntimeMeta(null);
       }
     };

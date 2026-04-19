@@ -25,6 +25,7 @@ def _set_shadow_mode(enabled: bool) -> None:
 @router.get("/status")
 async def shadow_status(
     db: AsyncSession = Depends(get_db),
+    _user=Depends(require_permission("read:cases")),
 ):
     """Expose shadow-mode safety state for buyer-facing demos."""
     runtime = get_runtime_settings()

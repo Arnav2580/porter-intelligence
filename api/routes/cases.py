@@ -412,10 +412,17 @@ async def list_cases(
             "total": total,
             "offset": offset,
             "limit": limit,
+            "data_source": "live_database",
         }
     except Exception:
         demo = _demo_cases_from_trips(limit, tier, status, zone_id)
-        return {"cases": demo, "total": len(demo), "offset": 0, "limit": limit}
+        return {
+            "cases": demo,
+            "total": len(demo),
+            "offset": 0,
+            "limit": limit,
+            "data_source": "synthetic_benchmark",
+        }
 
 
 @router.get("/summary/counts")
