@@ -326,7 +326,12 @@ async def fleet_zones():
                 zones_out.append(bz)
 
         if zones_out:
-            return {"zones": zones_out, "source": "live+benchmark", "generated_at": datetime.now().isoformat()}
+            return {
+                "zones":        zones_out,
+                "source":       "live+benchmark",
+                "generated_at": datetime.now().isoformat(),
+                "data_source":  "synthetic_benchmark",
+            }
         raise RuntimeError("No zones computed")
 
     except Exception as exc:
@@ -335,4 +340,5 @@ async def fleet_zones():
             "zones":        _FLEET_ZONES_BENCHMARK,
             "source":       "benchmark",
             "generated_at": datetime.now().isoformat(),
+            "data_source":  "synthetic_benchmark",
         }

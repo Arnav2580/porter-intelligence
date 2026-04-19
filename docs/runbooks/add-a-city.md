@@ -27,6 +27,6 @@ Objective:
 Run:
 
 ```bash
-PYTHONPATH=/Users/arnav/Porter ./venv/bin/pytest tests -q
+PYTHONPATH=$(pwd) ./venv/bin/pytest tests -q
 cd dashboard-ui && npm run build
 ```

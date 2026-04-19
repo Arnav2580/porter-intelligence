@@ -59,6 +59,7 @@ async def shadow_status(
             "shadow_cases_24h": 0,
             "action_shadow_cases_24h": 0,
             "status": "infrastructure_unavailable",
+            "data_source": "synthetic_benchmark",
             "note": "Database unreachable — shadow-mode case counts unavailable.",
         }
 
@@ -71,6 +72,7 @@ async def shadow_status(
         "shadow_cases_total": total_shadow_cases,
         "shadow_cases_24h": shadow_cases_24h,
         "action_shadow_cases_24h": action_cases_24h,
+        "data_source": "synthetic_benchmark",
         "note": (
             "When shadow mode is enabled, trips are scored normally but "
             "flagged cases are written only to shadow_cases and never trigger "

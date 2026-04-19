@@ -84,6 +84,37 @@ def get_tier(fraud_probability: float) -> ScoringTier:
         return TIERS["clear"]
 
 
+def get_action_threshold() -> float:
+    """Return the current action-tier threshold.
+
+    Reads model/weights/two_stage_config.json if present so enforcement and
+    scoring stay aligned. Falls back to the TIERS constant if the file is
+    unreachable.
+    """
+    config_path = MODEL_WEIGHTS / "two_stage_config.json"
+    try:
+        if config_path.exists():
+            with open(config_path) as f:
+                cfg = json.load(f)
+            return float(cfg.get("action_threshold", TIERS["action"].threshold_low))
+    except Exception:
+        pass
+    return TIERS["action"].threshold_low
+
+
+def get_watchlist_threshold() -> float:
+    """Return the current watchlist-tier threshold (see get_action_threshold)."""
+    config_path = MODEL_WEIGHTS / "two_stage_config.json"
+    try:
+        if config_path.exists():
+            with open(config_path) as f:
+                cfg = json.load(f)
+            return float(cfg.get("watchlist_threshold", TIERS["watchlist"].threshold_low))
+    except Exception:
+        pass
+    return TIERS["watchlist"].threshold_low
+
+
 # ── Watchlist escalation engine ───────────────────────────────
 
 def check_watchlist_escalation(
@@ -529,8 +560,8 @@ if __name__ == "__main__":
 
         # Add two-stage section
         report["two_stage"] = {
-            "action_threshold":        0.94,
-            "watchlist_threshold":     0.45,
+            "action_threshold":        0.80,
+            "watchlist_threshold":     0.50,
             "total_trips":             result["combined"]["total_trips"],
             "action_precision":        result["combined"]["action_precision"],
             "action_fpr":              result["combined"]["action_fpr"],

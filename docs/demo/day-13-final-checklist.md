@@ -129,7 +129,7 @@ All critical issues resolved. No blockers for demo day.
 | `greenlet` missing from requirements.txt | **FIXED** | Added `greenlet==3.2.5` |
 | SyntaxError in `api/routes/legal.py` (curly quotes) | **FIXED** | Replaced with straight quotes |
 | `data/samples/` accidentally archived | **FIXED** | Restored — needed by `test_batch_csv_endpoint_accepts_sample` |
-| Feature count wrong in logic docs (35 → 31) | **FIXED** | Updated `logic/01` and `logic/02` |
+| Feature count wrong in architecture docs (35 → 31) | **FIXED** | Documented in `docs/architecture.md` |
 | Private files in public GitHub repo | **FIXED** | Removed: `_archive/`, `data/raw/`, `model/weights/`, `docs/handover/`, `docs/demo/`, `docs/security/`, `docs/runbooks/rotate-secrets.md` |
 
 ---

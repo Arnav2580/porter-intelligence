@@ -50,10 +50,9 @@ This document describes what is in the transfer package, how to access it, and h
 
 | Location | Description |
 |----------|-------------|
-| `docs/` | Deployment guides, runbooks, security notes, handover docs |
-| `logic/` | 10-file deep-dive architecture documentation with Mermaid diagrams |
-| `how it works/` | 11-file non-technical system explainer |
-| `founders work/` | Commercial framing, deal strategy, and meeting preparation docs |
+| `docs/` | Deployment guides, runbooks, security notes, handover docs, architecture overview |
+| `docs/architecture.md` | Component topology, deployment layout, and design decisions |
+| `docs/runbooks/` | Operational runbooks: add-a-city, retrain-model, secret rotation |
 | `api/` (running) | Live OpenAPI spec at `/docs` and `/openapi.json` |
 
 ---
@@ -133,7 +132,7 @@ Files that MUST be committed:
 - `data/raw/drivers_sample_1000.csv`
 - `data/raw/evaluation_report.json`
 - `docs/handover/`
-- `docs/`, `logic/`, `how it works/`
+- `docs/`
 - `infrastructure/`
 - `.env.example`
 
@@ -147,8 +146,8 @@ A new technical owner follows this sequence to go from repository access to inde
 
 1. `docs/README.md` — documentation hub overview
 2. `docs/handover/package-structure.md` — understand what you have
-3. `logic/README.md` — deep-dive architecture index
-4. `docs/deployment/one-command-setup.md` — how to start it
+3. `docs/architecture.md` — component topology and design decisions
+4. `docs/handover/deployment-runbook.md` — how to start it
 
 ### 2. Get It Running Locally
 

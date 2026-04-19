@@ -78,13 +78,13 @@ async def lifespan(app):
         app_state["model"] = model
         console_log("XGBoost model loaded")
 
-    # Load threshold
+    # Load threshold — default matches watchlist_threshold in two_stage_config.json
     thresh_path = MODEL_WEIGHTS / "threshold.json"
     if thresh_path.exists():
         with open(thresh_path) as f:
             app_state["threshold"] = json.load(f)["threshold"]
     else:
-        app_state["threshold"] = 0.45
+        app_state["threshold"] = 0.50
 
     # Load feature names
     feat_path = MODEL_WEIGHTS / "feature_names.json"
@@ -326,8 +326,8 @@ async def lifespan(app):
     try:
         from monitoring.metrics import MODEL_INFO
         MODEL_INFO.info({
-            "version":         str(app_state.get("threshold", 0.45)),
-            "threshold":       str(app_state.get("threshold", 0.45)),
+            "version":         str(app_state.get("threshold", 0.50)),
+            "threshold":       str(app_state.get("threshold", 0.50)),
             "feature_count":   str(len(app_state.get("feature_names", []))),
         })
     except Exception as exc:

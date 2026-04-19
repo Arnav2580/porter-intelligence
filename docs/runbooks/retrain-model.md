@@ -17,9 +17,9 @@ Objective:
 
 ```bash
 source venv/bin/activate
-PYTHONPATH=/Users/arnav/Porter python model/train.py
-PYTHONPATH=/Users/arnav/Porter python model/scoring.py
-PYTHONPATH=/Users/arnav/Porter ./venv/bin/pytest tests/test_model.py -q
+PYTHONPATH=$(pwd) python model/train.py
+PYTHONPATH=$(pwd) python model/scoring.py
+PYTHONPATH=$(pwd) ./venv/bin/pytest tests/test_model.py -q
 ```
 
 ## Artifacts To Check

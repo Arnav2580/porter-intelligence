@@ -29,6 +29,7 @@ from api.routes.roi import (
 from api.schemas import ROICalculationRequest
 from api.state import app_state
 from auth.dependencies import require_permission
+from config.commercial import COMMERCIAL
 from database.connection import get_db
 from database.models import FraudCase, FraudCaseStatus
 
@@ -110,10 +111,11 @@ def _build_board_pack_pdf(
     )
     story.append(Spacer(1, 12))
 
-    # Load digital twin validation numbers
-    twin_report_path = Path(
-        "/Users/arnav/PorterTwin/reports/validation_one_month.json"
-    )
+    # Load digital twin validation numbers. Path is overridable for reviewers
+    # who clone the repo on different hosts — no absolute developer paths here.
+    import os as _os
+    twin_report_default = Path(__file__).resolve().parents[2] / "PorterTwin" / "reports" / "validation_one_month.json"
+    twin_report_path = Path(_os.getenv("TWIN_REPORT_PATH", str(twin_report_default)))
     twin_perf = {}
     twin_fp   = {}
     twin_ds   = {}
@@ -151,9 +153,9 @@ def _build_board_pack_pdf(
             "- Indicative annual recovery at Porter scale: ₹4.95 Cr (conservative)",
             "Data provenance: Porter-scale digital twin (synthetic). Real-data validation: 90-day shadow program.",
             "Commercial structure:",
-            "- Tranche 1: ₹1 crore on signing (non-refundable — full IP transfer)",
-            "- Tranche 2: ₹2.25 crore on 90-day validation success",
-            "- Total: ₹3.25 crore. Tranche 2 not due if validation criteria unmet.",
+            f"- Tranche 1: {COMMERCIAL.tranche_1_display} on signing (non-refundable — full IP transfer)",
+            f"- Tranche 2: {COMMERCIAL.tranche_2_display} on {COMMERCIAL.validation_days}-day validation success",
+            f"- Total: {COMMERCIAL.total_display}. Tranche 2 not due if validation criteria unmet.",
         ],
     )
     story.append(
@@ -301,11 +303,11 @@ def _build_board_pack_pdf(
     section(
         "Commercial Structure",
         [
-            "Structure: Two-tranche milestone acquisition. Total: ₹3,25,00,000 (₹3.25 crore).",
-            "Tranche 1 — ₹1,00,00,000 (₹1 crore) on signing. Non-refundable. Full IP transfer.",
-            "Tranche 2 — ₹2,25,00,000 (₹2.25 crore) on 90-day validation success.",
+            f"Structure: Two-tranche milestone acquisition. Total: {COMMERCIAL.total_display}.",
+            f"Tranche 1 — {COMMERCIAL.tranche_1_display} on signing. Non-refundable. Full IP transfer.",
+            f"Tranche 2 — {COMMERCIAL.tranche_2_display} on {COMMERCIAL.validation_days}-day validation success.",
             "Acceptance criteria: action-tier precision ≥70%, FPR ≤15%, ≥10,000 Porter trips scored.",
-            "If Tranche 2 criteria unmet: not due. Porter retains all IP. 30-day remediation at no charge.",
+            f"If Tranche 2 criteria unmet: not due. {COMMERCIAL.buyer_name} retains all IP. 30-day remediation at no charge.",
             "Exclusivity: not sold to any other Indian logistics company for 24 months from signing.",
         ],
     )

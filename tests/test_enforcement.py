@@ -18,12 +18,15 @@ def test_auto_enforce_skips_watchlist():
 
 
 def test_auto_enforce_skips_below_threshold():
+    # Action threshold is read from model/weights/two_stage_config.json
+    # (currently 0.80). Any probability below that must be skipped even
+    # if the upstream tier label says "action".
     from enforcement.dispatch import auto_enforce
     result = asyncio.run(
         auto_enforce(
             driver_id="D001",
             trip_id="T001",
-            fraud_probability=0.90,
+            fraud_probability=0.70,
             tier="action",
             top_signals=["test"],
         )
@@ -61,13 +64,17 @@ def test_action_severity_levels():
 
     from enforcement.dispatch import auto_enforce
 
-    # 0.999 → suspend
+    # 0.999 → suspend (>= 0.95)
     r = asyncio.run(auto_enforce("D", "T", 0.999, "action", []))
     assert r["action"] == "suspend"
 
-    # 0.95 → flag
-    r = asyncio.run(auto_enforce("D", "T", 0.95, "action", []))
+    # 0.90 → flag (>= 0.85, < 0.95)
+    r = asyncio.run(auto_enforce("D", "T", 0.90, "action", []))
     assert r["action"] == "flag"
+
+    # 0.82 → alert (>= 0.80 action threshold, < 0.85)
+    r = asyncio.run(auto_enforce("D", "T", 0.82, "action", []))
+    assert r["action"] == "alert"
 
 
 def test_auto_enforce_skips_when_shadow_mode_enabled(monkeypatch):

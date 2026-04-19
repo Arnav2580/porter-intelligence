@@ -356,6 +356,7 @@ async def top_risk_drivers(
             "total_shown":  len(results),
             "zone_filter":  zone_id,
             "generated_at": pd.Timestamp.now().isoformat(),
+            "data_source":  "synthetic_benchmark",
         }
 
     except Exception as exc:
@@ -378,4 +379,5 @@ async def top_risk_drivers(
             "zone_filter":  zone_id,
             "generated_at": pd.Timestamp.now().isoformat(),
             "source":       "fallback",
+            "data_source":  "synthetic_benchmark",
         }

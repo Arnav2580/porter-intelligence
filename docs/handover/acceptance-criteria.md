@@ -106,7 +106,7 @@ The response includes `reviewed_case_precision` for the last 24 hours and `preci
 **What is measured:** Porter's designated technical lead confirms in writing that the handover package is complete and adequate for independent operation.
 
 **What the handover package includes:**
-- Architecture documentation (`docs/` and `logic/` directories)
+- Architecture documentation (`docs/architecture.md` and `docs/` directory)
 - API reference (available at `/docs` on the running platform)
 - Deployment guide (`docs/deployment/one-command-setup.md`)
 - Runbooks: secret rotation, model retraining, city expansion, restore from backup

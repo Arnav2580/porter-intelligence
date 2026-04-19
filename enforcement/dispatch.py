@@ -1,8 +1,8 @@
 """
 Automated enforcement webhook.
 
-When fraud score reaches action tier (>= 0.94),
-fires HTTP payload to Porter's dispatch system.
+When fraud score reaches action tier (>= action_threshold from two_stage_config.json,
+currently 0.80), fires HTTP payload to Porter's dispatch system.
 
 Porter provides PORTER_DISPATCH_URL after pilot sign.
 Until then: logs the action, no HTTP call made.
@@ -17,11 +17,12 @@ from typing import Dict, Optional, List
 from datetime import datetime
 
 from database.case_store import should_enforce_actions
+from model.scoring import get_action_threshold
 
 logger = logging.getLogger(__name__)
 
 PORTER_DISPATCH_URL = os.getenv("PORTER_DISPATCH_URL", "")
-ACTION_THRESHOLD    = 0.94
+ACTION_THRESHOLD    = get_action_threshold()
 DISPATCH_TIMEOUT    = 5.0   # seconds
 
 
@@ -163,9 +164,9 @@ async def auto_enforce(
         return None
 
     # Severity based on probability
-    if fraud_probability >= 0.98:
+    if fraud_probability >= 0.95:
         action = "suspend"   # Lock driver immediately
-    elif fraud_probability >= 0.94:
+    elif fraud_probability >= 0.85:
         action = "flag"      # Flag in dispatch system
     else:
         action = "alert"     # Alert supervisor

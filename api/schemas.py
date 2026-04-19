@@ -79,6 +79,7 @@ class HeatmapResponse(BaseModel):
     total_trips:  int
     total_fraud:  int
     generated_at: str
+    data_source:  str = "synthetic_benchmark"
 
 
 class FraudFeedItem(BaseModel):
@@ -96,6 +97,7 @@ class LiveFeedResponse(BaseModel):
     items:        List[FraudFeedItem]
     total_shown:  int
     is_benchmark: bool = False   # True when serving historical CSV, not live stream
+    data_source:  str = "synthetic_benchmark"
 
 
 class KPISummaryResponse(BaseModel):

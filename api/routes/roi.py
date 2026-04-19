@@ -13,6 +13,7 @@ from api.schemas import (
     ROIScenario,
 )
 from api.state import app_state
+from config.commercial import COMMERCIAL
 
 router = APIRouter(prefix="/roi", tags=["roi"])
 
@@ -245,6 +246,7 @@ def roi_summary(
 
     return {
         "generated_at": datetime.utcnow().isoformat() + "Z",
+        "data_source":  "synthetic_benchmark",
         "inputs": {
             "trips_per_day":      trips_per_day,
             "fraud_rate_pct":     fraud_rate_pct,
@@ -285,15 +287,15 @@ def roi_summary(
             "Net recovery goes negative if action-tier FPR on real data exceeds ~15%",
         ],
         "shadow_pilot_value": (
-            "The 90-day validation program runs on Porter's real trip data in shadow mode. "
-            "If action-tier precision >= 70% and FPR <= 15%, Tranche 2 (₹2.25 crore) is triggered. "
+            f"The {COMMERCIAL.validation_days}-day validation program runs on real trip data in shadow mode. "
+            f"If action-tier precision >= 70% and FPR <= 15%, Tranche 2 ({COMMERCIAL.tranche_2_display}) is triggered. "
             "Shadow mode: zero operational risk — read-only, no enforcement writeback."
         ),
         "commercial_structure": {
-            "tranche_1":    "₹1,00,00,000 (₹1 crore) on signing — non-refundable, full IP transfer",
-            "tranche_2":    "₹2,25,00,000 (₹2.25 crore) on 90-day validation success",
-            "total":        "₹3,25,00,000 (₹3.25 crore) total",
-            "no_cure_no_pay": "Tranche 2 not due if validation criteria unmet. Porter retains all IP.",
+            "tranche_1":    f"{COMMERCIAL.tranche_1_display} on signing — non-refundable, full IP transfer",
+            "tranche_2":    f"{COMMERCIAL.tranche_2_display} on {COMMERCIAL.validation_days}-day validation success",
+            "total":        f"{COMMERCIAL.total_display} total",
+            "no_cure_no_pay": f"Tranche 2 not due if validation criteria unmet. {COMMERCIAL.buyer_name} retains all IP.",
             "exclusivity":  "Not sold to any other Indian logistics company for 24 months",
         },
     }

@@ -92,6 +92,7 @@ def _infra_unavailable_fallback(now: datetime) -> dict:
         "runtime_mode": runtime_mode,
         "synthetic_feed_enabled": app_state.get("synthetic_feed_enabled", False),
         "shadow_mode": app_state.get("shadow_mode", False),
+        "data_source": "synthetic_benchmark",
         "data_provenance": "Infrastructure unavailable — KPI metrics are temporarily offline.",
         "metric_status": "infrastructure_unavailable",
         "review_basis": "Database unreachable.",
@@ -291,6 +292,7 @@ async def kpi_live(db: AsyncSession = Depends(get_db)):
         "runtime_mode": runtime_mode,
         "synthetic_feed_enabled": synthetic_feed_enabled,
         "shadow_mode": shadow_mode,
+        "data_source": "synthetic_benchmark",
         "data_provenance": describe_data_provenance(
             runtime_mode,
             synthetic_feed_enabled,

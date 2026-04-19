@@ -11,7 +11,7 @@ import pandas as pd
 from datetime import datetime
 from typing import Dict, Optional
 
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Request
 
 from api.limiting import limiter
 from api.schemas import (
@@ -21,6 +21,7 @@ from api.schemas import (
     ZoneFraudRate, FraudFeedItem,
 )
 from api.state import app_state
+from auth.dependencies import require_permission
 from database.case_store import persist_flagged_case, should_enforce_actions
 from security.settings import get_rate_limit
 
@@ -731,13 +732,17 @@ def _build_top_signals(
     response_model=TripScoreResponse,
 )
 @limiter.limit(get_rate_limit("FRAUD_SCORE_RATE_LIMIT", "100/minute"))
-async def score_trip(request: Request, body: TripScoreRequest):
+async def score_trip(
+    request: Request,
+    body: TripScoreRequest,
+    _user=Depends(require_permission("read:cases")),
+):
     """
     Real-time fraud scoring for a single trip.
     Returns fraud probability, prediction, and top signals.
     """
     model     = app_state.get("model")
-    threshold = app_state.get("threshold", 0.45)
+    threshold = app_state.get("threshold", 0.50)
 
     if model is None:
         raise HTTPException(

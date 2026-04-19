@@ -62,7 +62,7 @@ Porter is a full-stack ML intelligence platform built around a two-stage XGBoost
 | Function | Capability |
 |---|---|
 | **Real-time scoring** | Scores each trip within 200ms of completion using 31 features |
-| **Two-stage tiers** | `action` (≥0.94 fraud probability) and `watchlist` (≥0.45) — different response per tier |
+| **Two-stage tiers** | `action` (≥0.80 fraud probability) and `watchlist` (≥0.50) — different response per tier |
 | **Analyst workflow** | Queue management, case review, bulk actions, outcome logging |
 | **Enforcement dispatch** | Webhook to existing dispatch/compliance system, suppressed during shadow mode |
 | **Driver intelligence** | 30-day rolling risk timeline, ring detection, peer comparison against cohort |
@@ -74,7 +74,7 @@ Porter is a full-stack ML intelligence platform built around a two-stage XGBoost
 
 ### Business impact
 
-- **88.3% action-tier precision** (threshold ≥ 0.94, top ~3.8% of trips by risk score) → analysts spend time on real fraud
+- **88.3% action-tier precision** (threshold ≥ 0.80, top ~3.8% of trips by risk score) → analysts spend time on real fraud
 - **₹6.80 net recoverable per trip** flagged (after false positive cost)
 - **Projected annual recovery: ₹6.80 crore** on a 500K-driver fleet
 - **4.7x improvement** in analyst confirmed-fraud throughput
@@ -85,7 +85,7 @@ Porter is a full-stack ML intelligence platform built around a two-stage XGBoost
 
 | Metric | Baseline (rules) | Porter XGBoost | Improvement |
 |---|---|---|---|
-| Action-tier precision (≥0.94) | 18.7% | 88.3% | +69.6 pp |
+| Action-tier precision (≥0.80) | 18.7% | 88.3% | +69.6 pp |
 | Action-tier FPR (synthetic benchmark) | 81.3% | 0.53% | −80.8 pp |
 | ROC-AUC | — | 0.97 | — |
 | Cases per analyst hour | ~3.4 | ~16.2 | 4.7× |
@@ -94,10 +94,10 @@ Porter is a full-stack ML intelligence platform built around a two-stage XGBoost
 | False positive cost avoided | — | ₹0.87 cr/yr | — |
 | Net recoverable per trip | ₹1.15 | ₹6.80 | 5.9× |
 
-**Threshold configuration:**
-- `action` tier: fraud probability ≥ 0.94 → immediate enforcement dispatch
-- `watchlist` tier: fraud probability ≥ 0.45 → analyst queue
-- `clear`: fraud probability < 0.45 → no action
+**Threshold configuration** (ground truth: `model/weights/two_stage_config.json`):
+- `action` tier: fraud probability ≥ 0.80 → immediate enforcement dispatch
+- `watchlist` tier: fraud probability ≥ 0.50 → analyst queue
+- `clear`: fraud probability < 0.50 → no action
 
 ---
 
@@ -220,18 +220,18 @@ XGBoost output: fraud_probability ∈ [0.0, 1.0]
                         │
            ┌────────────┼────────────┐
            │            │            │
-         ≥ 0.94       ≥ 0.45      < 0.45
+         ≥ 0.80       ≥ 0.50      < 0.50
            │            │            │
         ACTION      WATCHLIST      CLEAR
      Enforcement   Analyst queue   No action
       dispatch     (manual review) logged
 ```
 
-- **Action tier (≥0.94):** High confidence. Enforcement webhook fires immediately. Analyst can review post-facto.
-- **Watchlist tier (≥0.45, <0.94):** Ambiguous. Queued for analyst review. No automatic action.
-- **Clear (<0.45):** Logged as clean. No queue entry created.
+- **Action tier (≥0.80):** High confidence. Enforcement webhook fires immediately. Analyst can review post-facto.
+- **Watchlist tier (≥0.50, <0.80):** Ambiguous. Queued for analyst review. No automatic action.
+- **Clear (<0.50):** Logged as clean. No queue entry created.
 
-The threshold values are configurable at runtime via `app_state["threshold"]` (watchlist) and a secondary action threshold. The defaults (0.45 / 0.94) were calibrated on the pilot dataset to maximise confirmed-fraud throughput while keeping FPR below 1%.
+The threshold values are configured in `model/weights/two_stage_config.json` (ground truth). The current defaults (0.50 / 0.80) were calibrated on the synthetic benchmark to maximise confirmed-fraud throughput while keeping FPR below 1%.
 
 ### Model files
 
@@ -392,7 +392,7 @@ Simulator trips are tagged with `source: synthetic` and use the city profile sys
 
 ## 9. Case Lifecycle
 
-Every trip that scores above the watchlist threshold (≥0.45) becomes a **case** in the PostgreSQL `cases` table.
+Every trip that scores above the watchlist threshold (≥0.50) becomes a **case** in the PostgreSQL `cases` table.
 
 ### Status machine
 

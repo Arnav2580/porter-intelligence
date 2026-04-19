@@ -13,7 +13,7 @@ from pathlib import Path
 from datetime import datetime
 
 from dotenv import load_dotenv
-from fastapi import FastAPI, Depends
+from fastapi import Depends, FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, Response
 from slowapi import _rate_limit_exceeded_handler
@@ -181,13 +181,17 @@ async def root():
     return {"message": "Porter Intelligence Platform", "docs": "/docs"}
 
 
+from auth.dependencies import require_permission as _require_permission
+
+
 @app.post("/webhooks/dispatch/test")
-async def test_dispatch():
+async def test_dispatch(
+    _user=Depends(_require_permission("write:all")),
+):
     """
-    Test the downstream dispatch connection safely.
+    Test the downstream dispatch connection safely. Admin only.
     """
     from enforcement.dispatch import notify_dispatch
-    from auth.dependencies import require_permission
     result = await notify_dispatch(
         driver_id         = "TEST_DRIVER_001",
         trip_id           = "TEST_TRIP_001",

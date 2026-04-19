@@ -23,6 +23,7 @@ from reportlab.platypus import (
 )
 
 from auth.dependencies import require_permission
+from config.commercial import COMMERCIAL
 
 router = APIRouter(prefix="/legal", tags=["legal"])
 
@@ -31,27 +32,28 @@ _ACCEPTANCE_CRITERIA_MD = _DOCS_ROOT / "docs" / "handover" / "acceptance-criteri
 _SUPPORT_SCOPE_MD       = _DOCS_ROOT / "docs" / "handover" / "deployment-and-support-scope.md"
 _REPO_HANDOVER_MD       = _DOCS_ROOT / "docs" / "handover" / "repo-access-and-handover.md"
 
-_PORTER_BUYER          = "SmartShift Logistics Solutions Pvt Ltd (Porter)"
-_PLATFORM_NAME         = "Porter Intelligence Platform"
-_SUPPORT_DAYS          = 90
-_VALIDATION_DAYS       = 90
-_TRANCHE_1_INR         = 10_000_000
-_TRANCHE_1_DISPLAY     = "₹1,00,00,000 (₹1 crore)"
-_TRANCHE_2_INR         = 22_500_000
-_TRANCHE_2_DISPLAY     = "₹2,25,00,000 (₹2.25 crore)"
-_TOTAL_INR             = 32_500_000
-_TOTAL_DISPLAY         = "₹3,25,00,000 (₹3.25 crore)"
-# Legacy vars kept for backward compat in text helpers
-_SHADOW_EVAL_DAYS      = 90
-_SHADOW_EVAL_FEE       = _TRANCHE_1_DISPLAY
-_ASSET_TRANSFER_FEE    = _TRANCHE_2_DISPLAY
+# Commercial terms live in config/commercial.py so product code holds no
+# negotiation terms. Aliases below keep the existing template strings working.
+_PORTER_BUYER          = COMMERCIAL.buyer_name
+_PLATFORM_NAME         = COMMERCIAL.platform_name
+_SUPPORT_DAYS          = COMMERCIAL.support_days
+_VALIDATION_DAYS       = COMMERCIAL.validation_days
+_TRANCHE_1_INR         = COMMERCIAL.tranche_1_inr
+_TRANCHE_1_DISPLAY     = COMMERCIAL.tranche_1_display
+_TRANCHE_2_INR         = COMMERCIAL.tranche_2_inr
+_TRANCHE_2_DISPLAY     = COMMERCIAL.tranche_2_display
+_TOTAL_INR             = COMMERCIAL.total_inr
+_TOTAL_DISPLAY         = COMMERCIAL.total_display
+_SHADOW_EVAL_DAYS      = COMMERCIAL.shadow_eval_days
+_SHADOW_EVAL_FEE       = COMMERCIAL.shadow_eval_fee
+_ASSET_TRANSFER_FEE    = COMMERCIAL.asset_transfer_fee
 _SELLER_ENTITY = {
-    "name": "Porter Intelligence (Unregistered)",
-    "address": "[Seller registered address — to be confirmed on execution]",
-    "pan": "[Seller PAN — to be confirmed on execution]",
-    "gstin": "[Seller GSTIN if applicable]",
-    "email": "arnav2580goyal@gmail.com",
-    "signatory": "Arnav Goyal, Founder",
+    "name":      COMMERCIAL.seller_name,
+    "address":   COMMERCIAL.seller_address,
+    "pan":       COMMERCIAL.seller_pan,
+    "gstin":     COMMERCIAL.seller_gstin,
+    "email":     COMMERCIAL.seller_email,
+    "signatory": COMMERCIAL.seller_signatory,
 }
 _DRAFT_FOOTER_LINES = (
     "DRAFT — For discussion purposes only.",
