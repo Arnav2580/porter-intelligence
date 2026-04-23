@@ -67,11 +67,13 @@ def require_permission(permission: str):
             role = UserRole.READ_ONLY
 
         perms = ROLE_PERMISSIONS.get(role, [])
-        if (
-            permission not in perms
-            and "write:all" not in perms
-            and "read:all" not in perms
-        ):
+        # write:all (admin) bypasses every permission check.
+        if "write:all" in perms:
+            return user
+        # read:all bypasses read:* checks only — not write:all-gated routes.
+        if "read:all" in perms and not permission.startswith("write:"):
+            return user
+        if permission not in perms:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail=f"Permission denied: {permission}",
