@@ -1040,17 +1040,29 @@ function CaseDetail({ selectedCase, onBack, onOpenDriver, onOpenCase }) {
   );
 }
 
-const DEMO_DRIVERS = [
-  { id: 'DRV_RING_001', label: 'Ring Leader (Critical)' },
-  { id: 'DRV_RING_002', label: 'Ring Member (Mumbai)' },
-  { id: 'DRV_HIGH_001', label: 'High Risk Solo' },
-  { id: 'DRV_WATCH_001', label: 'Watchlist Driver' },
-];
+// Quick-pick driver IDs are loaded live from /intelligence/top-risk — no hardcoded IDs.
 
 function DriverProfile({ initialDriverId }) {
-  const [driverId, setDriverId] = useState(initialDriverId || 'DRV_RING_001');
+  const [driverId, setDriverId] = useState(initialDriverId || '');
   const [profile, setProfile] = useState(null);
   const [loading, setLoading] = useState(false);
+  const [quickPicks, setQuickPicks] = useState([]);
+
+  // Load real driver IDs from the top-risk endpoint for quick-pick buttons
+  useEffect(() => {
+    apiGet('/intelligence/top-risk')
+      .then((data) => {
+        const drivers = data.drivers || [];
+        setQuickPicks(drivers.slice(0, 4).map((d, i) => ({
+          id: d.driver_id,
+          label: `#${i + 1} ${d.risk_level || 'Risk'} Driver`,
+        })));
+      })
+      .catch(() => {
+        // If top-risk fails, show empty quick-picks — don't fake IDs
+        setQuickPicks([]);
+      });
+  }, []);
 
   const loadProfile = useCallback(async (idToLoad) => {
     if (!idToLoad) return;
@@ -1066,9 +1078,10 @@ function DriverProfile({ initialDriverId }) {
   }, []);
 
   useEffect(() => {
-    const idToUse = initialDriverId || 'DRV_RING_001';
-    setDriverId(idToUse);
-    loadProfile(idToUse);
+    if (initialDriverId) {
+      setDriverId(initialDriverId);
+      loadProfile(initialDriverId);
+    }
   }, [initialDriverId, loadProfile]);
 
   const peerMetrics = Object.entries(profile?.peer_comparison?.metrics || {});
@@ -1082,22 +1095,24 @@ function DriverProfile({ initialDriverId }) {
         </div>
       </div>
 
-      <div style={{ display: 'flex', gap: 8, marginBottom: 12, flexWrap: 'wrap' }}>
-        {DEMO_DRIVERS.map((d) => (
-          <button
-            key={d.id}
-            onClick={() => { setDriverId(d.id); loadProfile(d.id); }}
-            style={{
-              padding: '4px 10px', fontSize: 11,
-              background: driverId === d.id ? 'rgba(255,107,53,0.2)' : 'rgba(255,107,53,0.07)',
-              border: `1px solid ${driverId === d.id ? 'rgba(255,107,53,0.4)' : 'rgba(255,107,53,0.2)'}`,
-              borderRadius: 4, color: 'var(--orange)', cursor: 'pointer',
-            }}
-          >
-            {d.label}
-          </button>
-        ))}
-      </div>
+      {quickPicks.length > 0 && (
+        <div style={{ display: 'flex', gap: 8, marginBottom: 12, flexWrap: 'wrap' }}>
+          {quickPicks.map((d) => (
+            <button
+              key={d.id}
+              onClick={() => { setDriverId(d.id); loadProfile(d.id); }}
+              style={{
+                padding: '4px 10px', fontSize: 11,
+                background: driverId === d.id ? 'rgba(255,107,53,0.2)' : 'rgba(255,107,53,0.07)',
+                border: `1px solid ${driverId === d.id ? 'rgba(255,107,53,0.4)' : 'rgba(255,107,53,0.2)'}`,
+                borderRadius: 4, color: 'var(--orange)', cursor: 'pointer',
+              }}
+            >
+              {d.label}
+            </button>
+          ))}
+        </div>
+      )}
 
       <div className="driver-search-bar">
         <input
