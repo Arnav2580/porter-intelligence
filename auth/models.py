@@ -26,9 +26,11 @@ ROLE_PERMISSIONS: Dict[UserRole, List[str]] = {
     ],
     UserRole.OPS_ANALYST: [
         "read:cases",
-        "write:case_status",
+        "read:kpi",
         "read:drivers",
+        "write:case_status",
         "write:case_notes",
+        "write:driver_actions",
     ],
     UserRole.READ_ONLY: [
         "read:dashboard",

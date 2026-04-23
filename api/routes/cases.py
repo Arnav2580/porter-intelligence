@@ -329,51 +329,8 @@ def _to_dict(case: FraudCase) -> dict:
     }
 
 
-def _demo_cases_from_trips(
-    limit: int = 50,
-    tier_filter: Optional[str] = None,
-    status_filter: Optional[str] = None,
-    zone_filter: Optional[str] = None,
-) -> list[dict]:
-    trips_df: pd.DataFrame = app_state.get("trips_df", pd.DataFrame())
-    if trips_df.empty:
-        return []
-    fraud_df = trips_df[trips_df["is_fraud"] == True].copy()
-    if zone_filter:
-        fraud_df = fraud_df[fraud_df["pickup_zone_id"] == zone_filter]
-    now = _now_utc()
-    rows = []
-    for i, (_, row) in enumerate(fraud_df.head(limit).iterrows()):
-        prob = float(row.get("fraud_probability", 0.85))
-        tier = "action" if prob >= 0.80 else "watchlist"
-        if tier_filter and tier != tier_filter:
-            continue
-        st = status_filter or "open"
-        rows.append({
-            "id": str(uuid.uuid5(uuid.NAMESPACE_DNS, str(row.get("trip_id", i)))),
-            "trip_id": str(row.get("trip_id", f"TRP-DEMO-{i:05d}")),
-            "driver_id": str(row.get("driver_id", f"DRV-DEMO-{i:04d}"))[:12] + "...",
-            "zone_id": str(row.get("pickup_zone_id", "blr_koramangala")),
-            "city": _city_from_zone(str(row.get("pickup_zone_id", ""))),
-            "fraud_type": str(row.get("fraud_type", "fare_inflation")),
-            "tier": tier,
-            "fraud_probability": round(prob, 4),
-            "top_signals": row.get("top_signals") or [],
-            "fare_inr": float(row.get("fare_inr", 450)),
-            "recoverable_inr": float(row.get("recoverable_inr", 76)),
-            "status": st,
-            "assigned_to": None,
-            "analyst_notes": None,
-            "override_reason": None,
-            "auto_escalated": prob >= 0.95,
-            "case_age_hours": round((i % 12) + 0.5, 2),
-            "created_at": (now - timedelta(hours=(i % 12) + 0.5)).isoformat(),
-            "resolved_at": None,
-        })
-    return rows
-
-
 @router.get("")
+@router.get("/")
 async def list_cases(
     status: Optional[str] = Query(None),
     tier: Optional[str] = Query(None),
@@ -414,14 +371,16 @@ async def list_cases(
             "limit": limit,
             "data_source": "live_database",
         }
-    except Exception:
-        demo = _demo_cases_from_trips(limit, tier, status, zone_id)
+    except Exception as exc:
+        import logging
+        logging.getLogger(__name__).warning("list_cases DB unavailable: %s", exc)
         return {
-            "cases": demo,
-            "total": len(demo),
-            "offset": 0,
+            "cases": [],
+            "total": 0,
+            "offset": offset,
             "limit": limit,
-            "data_source": "synthetic_benchmark",
+            "data_source": "database_unavailable",
+            "note": "PostgreSQL is not reachable. Case queue is empty until the database is restored.",
         }
 
 
@@ -431,20 +390,27 @@ async def case_counts(
     user=Depends(require_permission("read:cases")),
 ):
     """Quick count by status for dashboard header."""
-    counts = {}
-    analyst_filter = None
-    if user["role"] == "ops_analyst":
-        analyst_filter = or_(
-            FraudCase.assigned_to == user["sub"],
-            FraudCase.assigned_to.is_(None),
-        )
-    for status in FraudCaseStatus:
-        query = select(func.count(FraudCase.id)).where(FraudCase.status == status)
-        if analyst_filter is not None:
-            query = query.where(analyst_filter)
-        n = await db.scalar(query)
-        counts[status.value] = n or 0
-    return counts
+    try:
+        counts = {}
+        analyst_filter = None
+        if user["role"] == "ops_analyst":
+            analyst_filter = or_(
+                FraudCase.assigned_to == user["sub"],
+                FraudCase.assigned_to.is_(None),
+            )
+        for status in FraudCaseStatus:
+            query = select(func.count(FraudCase.id)).where(FraudCase.status == status)
+            if analyst_filter is not None:
+                query = query.where(analyst_filter)
+            n = await db.scalar(query)
+            counts[status.value] = n or 0
+        return counts
+    except Exception as exc:
+        import logging
+        logging.getLogger(__name__).warning("case_counts DB unavailable: %s", exc)
+        return {
+            s.value: 0 for s in FraudCaseStatus
+        }
 
 
 @router.get("/summary/dashboard")
@@ -454,6 +420,31 @@ async def dashboard_summary(
 ):
     """Manager-focused summary for the analyst workstation."""
     now = _now_utc()
+    _DB_UNAVAILABLE_SUMMARY = {
+        "generated_at": now.isoformat(),
+        "data_source": "database_unavailable",
+        "note": "PostgreSQL is not reachable. Manager summary is unavailable until the database is restored.",
+        "queue": {
+            "open_cases": 0, "under_review_cases": 0, "escalated_cases": 0,
+            "confirmed_cases": 0, "false_alarm_cases": 0,
+            "avg_pending_hours": 0.0, "oldest_pending_hours": 0.0, "cases_older_than_2h": 0,
+        },
+        "throughput_24h": {
+            "opened_cases": 0, "reviewed_cases": 0, "confirmed_cases": 0,
+            "false_alarms": 0, "reviewed_case_precision": 0.0, "confirmed_recoverable_inr": 0.0,
+        },
+        "tier_breakdown": [], "city_breakdown": [], "zone_breakdown": [],
+        "analyst_load": [], "precision_trend_7d": [],
+    }
+    try:
+        return await _dashboard_summary_inner(db, user, now)
+    except Exception as exc:
+        import logging
+        logging.getLogger(__name__).warning("dashboard_summary DB unavailable: %s", exc)
+        return _DB_UNAVAILABLE_SUMMARY
+
+
+async def _dashboard_summary_inner(db, user, now):
     cutoff_24h = now - timedelta(hours=24)
     analyst_scope = None
     if user["role"] == "ops_analyst":
@@ -630,28 +621,6 @@ async def dashboard_summary(
     confirmed_cases_total = int(status_counts.get(FraudCaseStatus.CONFIRMED.value, 0))
     false_alarm_cases_total = int(status_counts.get(FraudCaseStatus.FALSE_ALARM.value, 0))
 
-    # Benchmark blend: if no review activity is persisted yet, seed plausible
-    # reviewer metrics from the open queue so the manager view never looks dead.
-    if reviewed_24h == 0 and open_cases > 0:
-        seed_reviewed = max(int(open_cases * 0.18), 42)
-        seed_confirmed = int(seed_reviewed * 0.71)
-        seed_false = seed_reviewed - seed_confirmed
-        seed_recovered = seed_confirmed * 2450.0
-        reviewed_24h = seed_reviewed
-        confirmed_24h = seed_confirmed
-        false_alarms_24h = seed_false
-        recovered_24h = seed_recovered
-        confirmed_cases_total = max(confirmed_cases_total, seed_confirmed)
-        false_alarm_cases_total = max(false_alarm_cases_total, seed_false)
-        # Seed 7-day trend with a decaying precision curve (72% -> 78%)
-        for idx, point in enumerate(precision_trend):
-            if point["reviewed_cases"] == 0:
-                day_reviewed = max(int(seed_reviewed / 7 * (0.85 + (idx % 3) * 0.1)), 8)
-                day_prec = round(0.70 + (idx / 9.0) + ((idx % 2) * 0.02), 4)
-                day_prec = min(max(day_prec, 0.55), 0.92)
-                point["reviewed_cases"] = day_reviewed
-                point["reviewed_case_precision"] = day_prec
-
     analyst_load = [
         {
             "analyst": assigned_to,
@@ -662,13 +631,6 @@ async def dashboard_summary(
         }
         for assigned_to, total, under_review, confirmed, false_alarm in analyst_rows
     ]
-    if not analyst_load and open_cases > 0:
-        analyst_load = [
-            {"analyst": "analyst_sharma", "assigned_cases": 124, "under_review_cases": 18, "confirmed_cases": 47, "false_alarm_cases": 9},
-            {"analyst": "analyst_rao",    "assigned_cases": 97,  "under_review_cases": 14, "confirmed_cases": 31, "false_alarm_cases": 6},
-            {"analyst": "analyst_khan",   "assigned_cases": 82,  "under_review_cases": 11, "confirmed_cases": 28, "false_alarm_cases": 4},
-            {"analyst": "analyst_iyer",   "assigned_cases": 68,  "under_review_cases": 9,  "confirmed_cases": 22, "false_alarm_cases": 3},
-        ]
 
     return {
         "generated_at": now.isoformat(),
@@ -823,49 +785,24 @@ async def update_case(
     db: AsyncSession = Depends(get_db),
     user=Depends(require_permission("write:case_status")),
 ):
-    try:
-        result = await db.execute(
-            select(FraudCase).where(FraudCase.id == _parse_case_uuid(case_id))
+    result = await db.execute(
+        select(FraudCase).where(FraudCase.id == _parse_case_uuid(case_id))
+    )
+    case = result.scalar_one_or_none()
+    if not case:
+        raise HTTPException(404, "Case not found")
+    db.add(
+        _apply_case_update(
+            case,
+            next_status=body.status,
+            analyst_notes=body.analyst_notes,
+            override_reason=body.override_reason,
+            user=user,
+            audit_action="case_status_change",
         )
-        case = result.scalar_one_or_none()
-        if not case:
-            raise HTTPException(404, "Case not found")
-        db.add(
-            _apply_case_update(
-                case,
-                next_status=body.status,
-                analyst_notes=body.analyst_notes,
-                override_reason=body.override_reason,
-                user=user,
-                audit_action="case_status_change",
-            )
-        )
-        await db.commit()
-        return _to_dict(case)
-    except HTTPException:
-        raise
-    except Exception:
-        return {
-            "id": case_id,
-            "status": body.status.value,
-            "analyst_notes": body.analyst_notes,
-            "override_reason": body.override_reason,
-            "tier": "action",
-            "fraud_probability": 0.88,
-            "top_signals": [],
-            "fare_inr": 0,
-            "recoverable_inr": 0,
-            "trip_id": "demo-trip",
-            "driver_id": "demo-driver",
-            "zone_id": "blr_koramangala",
-            "city": "Bangalore",
-            "fraud_type": "fare_inflation",
-            "assigned_to": user.get("sub"),
-            "auto_escalated": False,
-            "case_age_hours": 0.0,
-            "created_at": _now_utc().isoformat(),
-            "resolved_at": None,
-        }
+    )
+    await db.commit()
+    return _to_dict(case)
 
 
 @router.post("/{case_id}/driver-action")

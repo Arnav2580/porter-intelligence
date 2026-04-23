@@ -7,14 +7,19 @@ import DriverIntelligence from '../components/DriverIntelligence';
 import ZoneMap from '../components/ZoneMap';
 import TripScorer from '../components/TripScorer';
 
-const BENCHMARK = {
-  total_flagged_24h:                  4442,
-  action_tier_24h:                    1027,
-  watchlist_tier_24h:                 3415,
-  action_score_avg_pct:               94.4,
-  estimated_recoverable_per_trip:     5.08,
-  indicative_annual_recovery_crore:   6.87,
+const EMPTY_KPI = {
+  total_flagged_24h: 0,
+  action_tier_24h: 0,
+  watchlist_tier_24h: 0,
+  action_score_avg_pct: 0,
+  estimated_recoverable_per_trip: 0,
+  indicative_annual_recovery_crore: 0,
 };
+
+const fmtInt = (n) => (Number(n) || 0).toLocaleString('en-IN');
+const fmtPct = (n) => `${(Number(n) || 0).toFixed(1)}%`;
+const fmtInr = (n) => `\u20B9${(Number(n) || 0).toFixed(2)}`;
+const fmtCr  = (n) => `\u20B9${(Number(n) || 0).toFixed(2)} Cr`;
 
 function MetricCard({ value, label, sub, highlight }) {
   return (
@@ -61,42 +66,27 @@ function MetricCard({ value, label, sub, highlight }) {
   );
 }
 
-function OfflineScreen({ onRetry }) {
+function OfflineBanner({ onRetry }) {
   return (
     <div style={{
-      position: 'fixed', inset: 0,
-      background: '#0a0c10',
-      display: 'flex', flexDirection: 'column',
-      alignItems: 'center', justifyContent: 'center',
-      gap: 20,
+      display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+      padding: '8px 20px',
+      background: 'rgba(239,68,68,0.08)',
+      borderBottom: '1px solid rgba(239,68,68,0.25)',
+      fontSize: 12, color: 'var(--danger)', flexShrink: 0,
     }}>
-      <div style={{
-        width: 44, height: 44,
-        background: 'var(--orange)', borderRadius: 8,
-        display: 'flex', alignItems: 'center', justifyContent: 'center',
-        fontWeight: 800, fontSize: 22, color: 'white',
-        fontFamily: 'var(--font-display)',
-      }}>P</div>
-      <div style={{ color: 'var(--text)', fontSize: 16, fontWeight: 600, fontFamily: 'var(--font-display)' }}>
-        Porter Trip Intelligence
-      </div>
-      <div style={{
-        background: 'rgba(239,68,68,0.08)',
-        border: '1px solid rgba(239,68,68,0.25)',
-        borderRadius: 8, padding: '12px 24px', textAlign: 'center',
-      }}>
-        <div style={{ color: 'var(--danger)', fontWeight: 700, fontSize: 13, marginBottom: 4 }}>API Offline</div>
-        <div style={{ color: 'var(--muted)', fontSize: 11 }}>Check backend connection</div>
-      </div>
+      <span>
+        <strong>API offline.</strong> Live KPIs and feeds are paused. Retrying every 30 s.
+      </span>
       <button
         onClick={onRetry}
         style={{
-          padding: '8px 22px', background: 'var(--orange)', border: 'none',
-          borderRadius: 6, color: 'white', fontWeight: 700, fontSize: 12,
-          cursor: 'pointer', fontFamily: 'var(--font-display)',
+          padding: '4px 12px', background: 'rgba(239,68,68,0.15)',
+          border: '1px solid rgba(239,68,68,0.3)', borderRadius: 4,
+          color: 'var(--danger)', fontSize: 11, fontWeight: 600, cursor: 'pointer',
         }}
       >
-        Retry Connection
+        Retry now
       </button>
     </div>
   );
@@ -106,7 +96,7 @@ export default function Dashboard() {
   const navigate = useNavigate();
   const [apiStatus, setApiStatus] = useState('checking');
   const [healthMeta, setHealthMeta] = useState(null);
-  const [kpi, setKpi] = useState(BENCHMARK);
+  const [kpi, setKpi] = useState(EMPTY_KPI);
   const [scorerOpen, setScorerOpen] = useState(false);
 
   const doHealthCheck = async () => {
@@ -127,12 +117,7 @@ export default function Dashboard() {
   const fetchKpi = async () => {
     try {
       const data = await apiGet('/kpi/live');
-      setKpi({
-        ...BENCHMARK,
-        ...Object.fromEntries(
-          Object.entries(data).filter(([, v]) => v !== null && v !== undefined && v !== 0 && v !== '')
-        ),
-      });
+      setKpi({ ...EMPTY_KPI, ...data });
     } catch { /* keep prior KPI snapshot */ }
   };
 
@@ -171,22 +156,18 @@ export default function Dashboard() {
     );
   }
 
-  if (apiStatus === 'offline') {
-    return <OfflineScreen onRetry={() => { setApiStatus('checking'); doHealthCheck(); }} />;
-  }
+  const isOffline      = apiStatus === 'offline';
+  const syntheticFeed  = healthMeta?.synthetic_feed_enabled;
+  const runtimeMode    = healthMeta?.runtime_mode ?? 'unknown';
+  const modeLabel      = isOffline ? 'OFFLINE' : syntheticFeed ? 'DEMO MODE' : runtimeMode === 'prod' ? 'LIVE' : 'SHADOW';
+  const modeColor      = isOffline ? 'var(--danger)' : syntheticFeed ? 'var(--warning)' : 'var(--success)';
 
-  const syntheticFeed = healthMeta?.synthetic_feed_enabled;
-  const runtimeMode   = healthMeta?.runtime_mode ?? 'unknown';
-  const modeLabel     = syntheticFeed ? 'DEMO MODE' : runtimeMode === 'prod' ? 'LIVE' : 'SHADOW';
-  const modeColor     = syntheticFeed ? 'var(--warning)' : 'var(--success)';
-
-  const flaggedToday  = kpi.total_flagged_24h
-    || ((kpi.action_tier_24h || 0) + (kpi.watchlist_tier_24h || 0))
-    || 4442;
-  const actionCount   = kpi.action_tier_24h || 1027;
-  const scoreAvg      = kpi.action_score_avg_pct || 94.4;
-  const recPerTrip    = kpi.estimated_recoverable_per_trip || 5.08;
-  const annualCrore   = kpi.indicative_annual_recovery_crore || 6.87;
+  const flaggedToday = kpi.total_flagged_24h
+    || ((kpi.action_tier_24h || 0) + (kpi.watchlist_tier_24h || 0));
+  const actionCount  = kpi.action_tier_24h || 0;
+  const scoreAvg     = kpi.action_score_avg_pct || 0;
+  const recPerTrip   = kpi.estimated_recoverable_per_trip || 0;
+  const annualCrore  = kpi.indicative_annual_recovery_crore || 0;
 
   return (
     <div style={{
@@ -259,6 +240,10 @@ export default function Dashboard() {
           </button>
         </div>
       </div>
+
+      {isOffline && (
+        <OfflineBanner onRetry={() => { setApiStatus('checking'); doHealthCheck(); }} />
+      )}
 
       {/* ── KPI Strip ── */}
       <div style={{
@@ -351,7 +336,7 @@ export default function Dashboard() {
         flexShrink: 0,
       }}>
         <span style={{ fontSize: 9, color: 'rgba(255,255,255,0.2)', letterSpacing: '0.05em' }}>
-          SYNTHETIC DEMO DATA · PORTER INTELLIGENCE PLATFORM
+          {syntheticFeed ? 'SYNTHETIC DEMO DATA' : runtimeMode === 'prod' ? 'LIVE DATA' : 'SHADOW MODE'} · PORTER INTELLIGENCE PLATFORM
         </span>
       </div>
     </div>

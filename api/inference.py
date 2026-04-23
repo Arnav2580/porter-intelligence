@@ -75,7 +75,7 @@ def _benchmark_heatmap_fallback() -> HeatmapResponse:
     response_model=HeatmapResponse,
 )
 async def fraud_heatmap(
-    _user=Depends(require_permission("read:cases")),
+    _user=Depends(require_permission("read:kpi")),
 ):
     """
     Zone-level fraud rate heatmap for the live map.
@@ -183,7 +183,7 @@ async def fraud_heatmap(
 )
 async def fraud_live_feed(
     limit: int = 50,
-    _user=Depends(require_permission("read:cases")),
+    _user=Depends(require_permission("read:kpi")),
 ):
     """
     Fraud-flagged trip feed.
@@ -420,7 +420,7 @@ async def demand_forecast(
     response_model=KPISummaryResponse,
 )
 async def kpi_summary(
-    _user=Depends(require_permission("read:cases")),
+    _user=Depends(require_permission("read:kpi")),
 ):
     """
     Evaluation benchmark summary used by management and buyer review.
@@ -981,7 +981,7 @@ async def score_trip(
 
 @router.get("/fraud/tier-summary")
 async def fraud_tier_summary(
-    _user=Depends(require_permission("read:cases")),
+    _user=Depends(require_permission("read:kpi")),
 ):
     """
     Two-stage scoring tier summary.

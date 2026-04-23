@@ -286,7 +286,7 @@ async def zone_utilisation(
 
 @router.get("/efficiency/fleet-zones")
 async def fleet_zones(
-    _user=Depends(require_permission("read:cases")),
+    _user=Depends(require_permission("read:kpi")),
 ):
     """
     Fleet efficiency and utilisation data by zone for map display.

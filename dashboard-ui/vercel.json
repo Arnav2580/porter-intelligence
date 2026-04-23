@@ -3,6 +3,19 @@
     {
       "source": "/api/:path*",
       "destination": "https://dimly-disinfect-upright.ngrok-free.dev/:path*"
+    },
+    {
+      "source": "/((?!api/).*)",
+      "destination": "/index.html"
+    }
+  ],
+  "headers": [
+    {
+      "source": "/api/(.*)",
+      "headers": [
+        { "key": "ngrok-skip-browser-warning", "value": "true" },
+        { "key": "Cache-Control", "value": "no-cache" }
+      ]
     }
   ]
 }

@@ -133,7 +133,7 @@ def _infra_unavailable_fallback(now: datetime) -> dict:
 @router.get("/kpi/live")
 async def kpi_live(
     db: AsyncSession = Depends(get_db),
-    _user=Depends(require_permission("read:cases")),
+    _user=Depends(require_permission("read:kpi")),
 ):
     """
     Live KPI numbers computed from PostgreSQL fraud_cases in real time.
