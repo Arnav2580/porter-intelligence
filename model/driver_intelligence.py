@@ -188,7 +188,7 @@ def compute_peer_comparison(
             "avg_fare":      df["fare_inr"].mean(),
             "trips_per_day": total / max(
                 (
-                    pd.to_datetime(df["requested_at"]).dt.date.nunique()
+                    pd.to_datetime(df["requested_at"], format="mixed").dt.date.nunique()
                 ), 1
             ),
         }
@@ -225,7 +225,7 @@ def compute_peer_comparison(
         "n_drivers_in_zone": len(zone_stats_per_driver),
         "metrics": {
             "fraud_rate": {
-                "driver":     round(this_stats["fraud_rate"], 4),
+                "driver":     round(float(this_stats["fraud_rate"]), 4),
                 "zone_median": round(
                     float(zone_df["fraud_rate"].median()), 4
                 ),
@@ -233,12 +233,12 @@ def compute_peer_comparison(
                     this_stats["fraud_rate"],
                     zone_df["fraud_rate"]
                 ), 1),
-                "flag": this_stats["fraud_rate"] > (
+                "flag": bool(this_stats["fraud_rate"] > (
                     zone_df["fraud_rate"].median() * 2
-                ),
+                )),
             },
             "cancellation_rate": {
-                "driver":     round(this_stats["cancel_rate"], 4),
+                "driver":     round(float(this_stats["cancel_rate"]), 4),
                 "zone_median": round(
                     float(zone_df["cancel_rate"].median()), 4
                 ),
@@ -246,12 +246,12 @@ def compute_peer_comparison(
                     this_stats["cancel_rate"],
                     zone_df["cancel_rate"]
                 ), 1),
-                "flag": this_stats["cancel_rate"] > (
+                "flag": bool(this_stats["cancel_rate"] > (
                     zone_df["cancel_rate"].median() * 2
-                ),
+                )),
             },
             "cash_trip_ratio": {
-                "driver":     round(this_stats["cash_ratio"], 4),
+                "driver":     round(float(this_stats["cash_ratio"]), 4),
                 "zone_median": round(
                     float(zone_df["cash_ratio"].median()), 4
                 ),
@@ -259,12 +259,12 @@ def compute_peer_comparison(
                     this_stats["cash_ratio"],
                     zone_df["cash_ratio"]
                 ), 1),
-                "flag": this_stats["cash_ratio"] > (
+                "flag": bool(this_stats["cash_ratio"] > (
                     zone_df["cash_ratio"].median() * 2.5
-                ),
+                )),
             },
             "avg_fare": {
-                "driver":     round(this_stats["avg_fare"], 2),
+                "driver":     round(float(this_stats["avg_fare"]), 2),
                 "zone_median": round(
                     float(zone_df["avg_fare"].median()), 2
                 ),
@@ -272,12 +272,12 @@ def compute_peer_comparison(
                     this_stats["avg_fare"],
                     zone_df["avg_fare"]
                 ), 1),
-                "flag": this_stats["avg_fare"] > (
+                "flag": bool(this_stats["avg_fare"] > (
                     zone_df["avg_fare"].median() * 1.8
-                ),
+                )),
             },
             "trips_per_day": {
-                "driver":     round(this_stats["trips_per_day"], 2),
+                "driver":     round(float(this_stats["trips_per_day"]), 2),
                 "zone_median": round(
                     float(zone_df["trips_per_day"].median()), 2
                 ),
