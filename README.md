@@ -1,1090 +1,1625 @@
 # Porter Intelligence Platform
 
-**Real-time fraud detection, driver intelligence, and fleet analytics for large-scale ride-hailing and logistics operations.**
+**Trip-level fraud scoring, case workflow, driver intelligence, route efficiency, demand forecasting, and operating analytics for logistics networks.**
 
-Porter replaces manual, reactive compliance workflows with a fully automated ML pipeline: trips are scored the moment they complete, high-risk cases surface instantly to analysts, and enforcement actions are dispatched within seconds — all with a complete audit trail.
+Porter Intelligence is a full-stack ML platform built around FastAPI, React/Vite, PostgreSQL, Redis Streams, and an XGBoost classifier. It ingests completed trip events, normalizes them into a canonical trip schema, builds a 44-feature behavioral vector, scores fraud probability, classifies each trip into a two-stage tier, persists reviewable cases, and exposes dashboard, analyst, KPI, report, ROI, legal, shadow-mode, and intelligence endpoints.
+
+This README is the current source of truth for the repository as of **2026-04-28**. It intentionally replaces older README text that referred to a 31-feature model, `SECRET_KEY`, `ALLOWED_ORIGINS`, `/auth/login`, `/ingest/webhook`, `/route/reallocation`, `fraud_model.ubj`, fixed ngrok rewrites, or unregistered route shim modules. Those names are stale for the current codebase.
+
+Detailed companion docs:
+
+- [documentation.md](documentation.md) - deeper engineering documentation.
+- [docs/architecture-map.md](docs/architecture-map.md) - repository map and Mermaid diagrams.
+- [docs/architecture-map.mmd](docs/architecture-map.mmd) - readable Mermaid AI / Mermaid Live control-room diagram.
+- [_archive/unused_modules/api_route_shims/README.md](_archive/unused_modules/api_route_shims/README.md) - archived route shims that are no longer part of the live API surface.
 
 ---
 
-## Table of Contents
+## Table Of Contents
 
-1. [Problem Statement](#1-problem-statement)
-2. [Solution](#2-solution)
-3. [Live Benchmarks](#3-live-benchmarks)
+1. [Current Verification Status](#1-current-verification-status)
+2. [Problem Statement](#2-problem-statement)
+3. [What The Platform Does](#3-what-the-platform-does)
 4. [Architecture Overview](#4-architecture-overview)
-5. [Tech Stack](#5-tech-stack)
-6. [Fraud Detection Model](#6-fraud-detection-model)
-7. [Feature Engineering — 31 Features](#7-feature-engineering--31-features)
-8. [Ingestion Pipeline](#8-ingestion-pipeline)
-9. [Case Lifecycle](#9-case-lifecycle)
-10. [Driver Intelligence](#10-driver-intelligence)
-11. [Demand Forecasting](#11-demand-forecasting)
-12. [Route Efficiency](#12-route-efficiency)
-13. [Security Architecture](#13-security-architecture)
-14. [Shadow Mode](#14-shadow-mode)
-15. [Digital Twin (Synthetic Data Engine)](#15-digital-twin-synthetic-data-engine)
-16. [API Reference](#16-api-reference)
-17. [Frontend Dashboard](#17-frontend-dashboard)
-18. [Deployment](#18-deployment)
-19. [Testing](#19-testing)
-20. [Project Structure](#20-project-structure)
-21. [Quickstart](#21-quickstart)
+5. [Runtime Flow](#5-runtime-flow)
+6. [Tech Stack](#6-tech-stack)
+7. [Fraud Detection Model](#7-fraud-detection-model)
+8. [Feature Engineering - 44 Features](#8-feature-engineering---44-features)
+9. [Data Files And Data Provenance](#9-data-files-and-data-provenance)
+10. [Ingestion Pipeline](#10-ingestion-pipeline)
+11. [Case Lifecycle](#11-case-lifecycle)
+12. [Driver Intelligence](#12-driver-intelligence)
+13. [Demand Forecasting](#13-demand-forecasting)
+14. [Route Efficiency](#14-route-efficiency)
+15. [Security Architecture](#15-security-architecture)
+16. [Shadow Mode](#16-shadow-mode)
+17. [Digital Twin And Synthetic Data Engine](#17-digital-twin-and-synthetic-data-engine)
+18. [Live API Surface](#18-live-api-surface)
+19. [Frontend Dashboard](#19-frontend-dashboard)
+20. [Deployment And Runtime Configuration](#20-deployment-and-runtime-configuration)
+21. [Testing And Quality Gates](#21-testing-and-quality-gates)
+22. [Project Structure](#22-project-structure)
+23. [What Is Active vs Archived](#23-what-is-active-vs-archived)
+24. [Quickstart](#24-quickstart)
+25. [Production Handoff Notes](#25-production-handoff-notes)
 
 ---
 
-## 1. Problem Statement
+## 1. Current Verification Status
 
-Large ride-hailing and logistics platforms operating across multiple Indian cities face a silent revenue crisis: fare manipulation, ghost trips, collusion rings, and surge abuse drain 5–7% of gross revenue every year.
+The current codebase has been cleaned so that the live API surface is explicit and test-protected.
 
-### The scale of the problem
+Verified locally:
 
-- **500,000+ active drivers** across Tier-1 and Tier-2 cities
-- **5.9% observed fraud rate** across all trip categories
-- **₹6.87 crore annual revenue leakage** (extrapolated from pilot data)
-- **Baseline detection precision: 18.7%** using rule-based systems — meaning 81.3% of flagged trips are false positives
-- **Average analyst review time: 4.2 minutes per trip** at 18.7% precision
-- **Effective analyst throughput: 3–4 confirmed fraud cases per hour**
+```bash
+./venv/bin/pytest -q
+# 65 passed
 
-### Why rules alone fail
+./venv/bin/flake8 .
+# passed
 
-Rule-based systems (fare > 3x expected, distance > 50 km, zone mismatch) flag too broadly. Every rule has a threshold, and fraudsters learn it. They operate just below it. Worse, legitimate edge cases (airport trips, surge pricing, long rural routes) constantly trigger false positives and erode analyst trust in the system.
+./venv/bin/bandit -q -r . -c .bandit
+# passed
 
-The root issue is that fraud is a **multi-dimensional behavioral pattern**, not a single-variable threshold. Detecting it requires combining trip geometry, fare economics, driver history, payment behaviour, zone context, and temporal signals simultaneously.
+cd dashboard-ui
+npm run lint
+npm run build
+# passed
+```
 
----
+Current production-readiness corrections already applied:
 
-## 2. Solution
-
-Porter is a full-stack ML intelligence platform built around a two-stage XGBoost classifier. It scores every trip as it completes, routes high-confidence fraud to an analyst queue, and dispatches enforcement to your existing dispatch system — all within seconds of trip completion.
-
-### What Porter does
-
-| Function | Capability |
+| Area | Current state |
 |---|---|
-| **Real-time scoring** | Scores each trip within 200ms of completion using 31 features |
-| **Two-stage tiers** | `action` (≥0.80 fraud probability) and `watchlist` (≥0.50) — different response per tier |
-| **Analyst workflow** | Queue management, case review, bulk actions, outcome logging |
-| **Enforcement dispatch** | Webhook to existing dispatch/compliance system, suppressed during shadow mode |
-| **Driver intelligence** | 30-day rolling risk timeline, ring detection, peer comparison against cohort |
-| **Demand forecasting** | Prophet model per zone, 24-hour horizon, surge prediction |
-| **Route efficiency** | Dead mile analysis, vehicle utilisation scoring, reallocation recommendations |
-| **Shadow mode** | Full platform operation with enforcement suppressed — validation without risk |
-| **Digital twin** | Synthetic trip generator across 22 Indian cities, 5 fraud archetypes |
-| **Audit trail** | Every action by every analyst is logged with timestamp, reason, and outcome |
+| Router registration | `api/router_registry.py` is now the single live router registration surface. |
+| Unused route shims | `api/routes/fraud.py`, `api/routes/kpi.py`, and `api/routes/demand.py` were not registered at runtime and have been moved to `_archive/unused_modules/api_route_shims/`. |
+| Backend root route | `/` now returns API metadata. It no longer tries to serve the old empty `dashboard/` directory. The real UI lives in `dashboard-ui/`. |
+| API contract | `tests/test_api_contract.py` locks the deployed route table so hidden route drift fails tests. |
+| Feature contract | The model uses 44 features. The old 31-feature documentation is obsolete. |
+| Threshold contract | `action >= 0.80`, `watchlist >= 0.50`, `clear < 0.50`. |
+| Secrets | The code uses `JWT_SECRET_KEY` and `API_ALLOWED_ORIGINS`, not `SECRET_KEY` or `ALLOWED_ORIGINS`. |
+| Frontend secrets | `dashboard-ui/.env.production` no longer contains a committed viewer password. |
+| Proxy configuration | Hardcoded ngrok tunnel URLs were removed from committed deploy files. |
+| Netlify proxy | `dashboard-ui/netlify/edge-functions/api-proxy.js` reads `PORTER_API_UPSTREAM` from hosting environment. |
 
-### Business impact
-
-- **88.3% action-tier precision** (threshold ≥ 0.80, top ~3.8% of trips by risk score) → analysts spend time on real fraud
-- **₹6.80 net recoverable per trip** flagged (after false positive cost)
-- **Projected annual recovery: ₹6.80 crore** on a 500K-driver fleet
-- **4.7x improvement** in analyst confirmed-fraud throughput
+The current test count is **65 tests across 19 backend test files**. Frontend build/lint is separate and also passes.
 
 ---
 
-## 3. Live Benchmarks
+## 2. Problem Statement
 
-| Metric | Baseline (rules) | Porter XGBoost | Improvement |
-|---|---|---|---|
-| Action-tier precision (≥0.80) | 18.7% | 88.3% | +69.6 pp |
-| Action-tier FPR (synthetic benchmark) | 81.3% | 0.53% | −80.8 pp |
-| ROC-AUC | — | 0.97 | — |
-| Cases per analyst hour | ~3.4 | ~16.2 | 4.7× |
-| Scoring latency (p95) | — | 180ms | — |
-| Annual recovery (500K fleet) | ₹1.28 cr | ₹6.80 cr | 5.3× |
-| False positive cost avoided | — | ₹0.87 cr/yr | — |
-| Net recoverable per trip | ₹1.15 | ₹6.80 | 5.9× |
+Large logistics and ride-hailing platforms face revenue leakage from behavioral fraud that happens after an account has already passed identity checks. Device fingerprinting and KYC can catch fake accounts, but verified drivers can still manipulate trip behavior.
 
-**Threshold configuration** (ground truth: `model/weights/two_stage_config.json`):
-- `action` tier: fraud probability ≥ 0.80 → immediate enforcement dispatch
-- `watchlist` tier: fraud probability ≥ 0.50 → analyst queue
-- `clear`: fraud probability < 0.50 → no action
+Common fraud and abuse patterns:
+
+| Pattern | What happens | Signals |
+|---|---|---|
+| Cash extortion | Driver inflates fare or demands extra cash | High fare-to-expected ratio, cash payment, complaint flag |
+| Ghost trip | Trip is logged but the route is impossible or not actually driven | Very low GPS pings, impossible speed, cancelled status, coordinate mismatch |
+| Route deviation | Driver claims a longer route than the direct route supports | GPS distance vs haversine ratio, fare per km, duration anomalies |
+| Fake cancellation | Driver accepts, waits, cancels, or cycles cancellation behavior | Cancellation velocity, cancellation rate, status signals |
+| GPS spoofing | Device reports manipulated route or unusually perfect/mock location data | Mock provider, GPS accuracy, ping count, speed spikes |
+| Loading fraud | Loading or waiting charges are inflated | Loading time vs goods-category norms |
+| Partial delivery / POD issues | Proof of delivery or location evidence does not line up | POD photo flag, POD location match, OTP signals |
+
+The core issue is that fraud is not a single threshold. It is a multi-dimensional behavioral pattern across trip economics, route geometry, GPS integrity, driver history, payment mode, zone history, proof-of-delivery data, OTP behavior, and time context. This repository implements that combined detection surface.
+
+---
+
+## 3. What The Platform Does
+
+Porter Intelligence has five major runtime jobs:
+
+1. **Ingest trip data** through live webhook, batch CSV, or demo simulator.
+2. **Normalize schema** with `ingestion/schema_mapper.py` and `ingestion/schema_map.default.json`.
+3. **Score trip fraud** through `ml/stateless_scorer.py` and XGBoost model weights.
+4. **Persist and review cases** through PostgreSQL-backed case workflow.
+5. **Expose operations surfaces** through dashboard, analyst UI, live KPIs, reports, ROI, legal packets, driver intelligence, route efficiency, and shadow-mode endpoints.
+
+### Capability Matrix
+
+| Function | Current implementation |
+|---|---|
+| Real-time trip scoring | `POST /fraud/score`, `ml/stateless_scorer.py`, `model/weights/xgb_fraud_model.json` |
+| Stream processing | `ingestion/streams.py` consumes Redis Stream messages and scores trips |
+| Two-stage tiers | `model/weights/two_stage_config.json` and `model/scoring.py` |
+| Case workflow | `api/routes/cases.py`, `database/case_store.py`, `database/models.py` |
+| Analyst dashboard | `dashboard-ui/src/pages/Analyst.jsx` |
+| Executive dashboard | `dashboard-ui/src/pages/Dashboard.jsx` |
+| Driver intelligence | `api/routes/driver_intelligence.py`, `model/driver_intelligence.py` |
+| Demand forecasting | `model/demand.py`, `model/weights/demand_models.pkl`, `GET /demand/forecast/{zone_id}` |
+| Route efficiency | `api/routes/route_efficiency.py`, `model/route_efficiency.py` |
+| ROI calculator | `api/routes/roi.py`, `dashboard-ui/src/components/ROICalculator.jsx` |
+| Legal downloads | `api/routes/legal.py`, ReportLab PDF generation |
+| Natural language query | `api/routes/query.py`, `model/query.py` |
+| Shadow mode | `api/routes/shadow.py`, `SHADOW_MODE` runtime flag |
+| Synthetic demo feed | `ingestion/live_simulator.py`, `generator/*`, Redis stream |
+| Observability | `/metrics`, `monitoring/metrics.py`, Prometheus, Grafana |
+| Router contract | `api/router_registry.py`, `tests/test_api_contract.py` |
 
 ---
 
 ## 4. Architecture Overview
 
-```
-┌─────────────────────────────────────────────────────────────────────────────┐
-│                         PORTER INTELLIGENCE PLATFORM                        │
-└─────────────────────────────────────────────────────────────────────────────┘
-
-  DATA SOURCES                INGESTION               PROCESSING
-  ─────────────               ─────────               ──────────
-  Trip webhooks   ──────────► Webhook API  ──────────► Redis Stream
-  Batch CSV       ──────────► Schema mapper            porter:trips
-  Live simulator  ──────────► Staging fallback         │
-  City feeds      ──────────► City profiles            │
-                                                        ▼
-  ┌──────────────────────────────────────────── SCORING WORKER ──────────────┐
-  │  XREAD porter:trips → build_feature_vector(31 features) → XGBoost score  │
-  │  → tier classification → write to cases table → XACK                     │
-  └───────────────────────────────────────────────────────────────────────────┘
-                              │
-                              ▼
-  ┌──────────────────── CASE MANAGEMENT ─────────────────────────────────────┐
-  │  cases table (PostgreSQL)                                                 │
-  │  status: pending → under_review → confirmed / cleared                    │
-  │  analyst isolation: case locked to reviewing analyst                      │
-  │  shadow_cases: parallel table, enforcement suppressed                     │
-  └───────────────────────────────────────────────────────────────────────────┘
-                              │
-               ┌──────────────┼──────────────┐
-               ▼              ▼              ▼
-  ┌──────────────┐   ┌──────────────┐   ┌──────────────────┐
-  │  ENFORCEMENT │   │  ANALYTICS   │   │  INTELLIGENCE    │
-  │  DISPATCH    │   │  ENGINE      │   │  ENGINE          │
-  │  Webhook     │   │  KPI board   │   │  Driver risk     │
-  │  suppressed  │   │  ROI calc    │   │  Ring detection  │
-  │  in shadow   │   │  Board pack  │   │  Peer compare    │
-  └──────────────┘   └──────────────┘   └──────────────────┘
-
-  SECURITY LAYER (all paths)
-  ─────────────────────────
-  JWT HS256 auth → RBAC (admin / ops_analyst / city_ops / read_only)
-  AES-256-GCM PII encryption → Prometheus metrics → Rate limiting
-
-  FRONTEND
-  ────────
-  React + Vite (Netlify) → Vite proxy → FastAPI (Render / AWS ECS Fargate)
-  Analyst dashboard / KPI panel / Trip scorer / ROI calculator
+```text
+                                      Browser
+                                        |
+                                        v
+                          dashboard-ui React + Vite
+                                        |
+                                        v
+                               dashboard-ui/src/utils/api.js
+                                        |
+                                        v
+┌──────────────────────────────── FastAPI Control Plane ────────────────────────────────┐
+│ api/main.py                                                                           │
+│ - middleware: CORS, security headers, Prometheus latency                              │
+│ - core routes: /, /health, /metrics, /webhooks/dispatch/test                          │
+│ - live routers registered through api/router_registry.py                              │
+└───────────────────────────────────────┬───────────────────────────────────────────────┘
+                                        |
+          ┌─────────────────────────────┼─────────────────────────────┐
+          v                             v                             v
+  Ingestion and streams          Runtime scoring                 API route modules
+  ingestion/webhook.py           api/inference.py                api/routes/*
+  ingestion/streams.py           ml/stateless_scorer.py          cases, auth, reports,
+  Redis Stream                   model/scoring.py                legal, roi, query,
+  porter:trips                   model/weights/*                 efficiency, shadow
+          |                             |                             |
+          v                             v                             v
+      Redis cache                 XGBoost model                 PostgreSQL case store
+      driver/zone                 44-feature vector             database/case_store.py
+      features                    two-stage tier                database/models.py
+          |                             |                             |
+          └─────────────────────────────┴─────────────────────────────┘
+                                        |
+                                        v
+                          Business output surfaces
+        Fraud feed | case queue | KPI board | reports | ROI | legal | intelligence
 ```
 
-**Request flow:**
-1. Trip data arrives via webhook, batch CSV, or live Redis simulator
-2. Schema mapper normalises city-specific field names to Porter's canonical schema
-3. Event written to `porter:trips` Redis Stream
-4. Scoring worker reads stream, builds 31-feature vector, scores with XGBoost
-5. Score → tier → case written to PostgreSQL `cases` table
-6. `action` tier cases trigger enforcement dispatch webhook
-7. Analysts review cases in the dashboard, log outcomes
-8. Reviewed outcomes feed back into KPI board, reports, and ROI calculations
+### Runtime source of truth
+
+| Concern | Source file |
+|---|---|
+| FastAPI app | `api/main.py` |
+| Router registration | `api/router_registry.py` |
+| Startup state | `api/state.py` |
+| Trip scoring endpoints | `api/inference.py` |
+| Case workflow | `api/routes/cases.py` |
+| Auth and RBAC | `auth/*`, `api/routes/auth.py` |
+| Ingestion endpoints | `ingestion/webhook.py` |
+| Stream worker | `ingestion/streams.py` |
+| Feature engineering | `model/features.py` |
+| Runtime scorer | `ml/stateless_scorer.py` |
+| Feature order | `model/weights/feature_names.json` |
+| Model weights | `model/weights/xgb_fraud_model.json` |
+| Tier thresholds | `model/weights/two_stage_config.json` |
+| Frontend API calls | `dashboard-ui/src/utils/api.js` |
+| Visual architecture map | `docs/architecture-map.mmd` |
 
 ---
 
-## 5. Tech Stack
+## 5. Runtime Flow
 
-| Layer | Technology | Version | Purpose |
-|---|---|---|---|
-| **API framework** | FastAPI | 0.115 | Async REST API, OpenAPI docs |
-| **ML model** | XGBoost | 2.0 | Two-stage fraud classifier |
-| **Forecasting** | Prophet | 1.1 | Zone-level demand forecasting |
-| **Feature engineering** | scikit-learn, pandas, numpy | latest | Feature preprocessing, transformations |
-| **Database** | PostgreSQL 16 | — | Cases, audit log, driver profiles |
-| **Cache / streams** | Redis 7 | — | Real-time trip stream, rate limiting |
-| **Async ORM** | SQLAlchemy 2 + asyncpg | — | Async DB access |
-| **Auth** | PyJWT | — | HS256 JWT token issuance and validation |
-| **Encryption** | Python cryptography | — | AES-256-GCM PII field encryption |
-| **PDF generation** | reportlab | — | Board packs, legal close packet |
-| **Rate limiting** | slowapi | — | Per-endpoint request throttling |
-| **Frontend** | React 18 + Vite | — | Analyst dashboard |
-| **Maps** | Leaflet + react-leaflet | — | Trip route visualisation |
-| **Observability** | Prometheus + Grafana | — | Request latency, model metrics |
-| **Infrastructure** | AWS ECS Fargate + RDS + ElastiCache | — | Production hosting |
-| **Frontend hosting** | Netlify | — | React dashboard CDN |
-| **Containerisation** | Docker + Docker Compose | — | Local dev and CI |
-| **Task scheduling** | APScheduler | — | Periodic KPI refresh, simulator ticks |
-| **Dependency injection** | FastAPI Depends | — | Auth, DB session, rate limiter |
+### Live trip scoring flow
+
+```text
+1. Partner system sends a completed trip event.
+2. POST /ingest/trip-completed receives the payload.
+3. ingestion/schema_mapper.py maps partner fields to canonical schema.
+4. Event is written to Redis Stream porter:trips.
+5. ingestion/streams.py reads the stream.
+6. ml/stateless_scorer.py builds the 44-feature vector.
+7. XGBoost model returns fraud probability.
+8. model/scoring.py applies two-stage tier thresholds.
+9. action/watchlist cases are persisted through database/case_store.py.
+10. Dashboard and analyst screens fetch the latest cases/KPIs through FastAPI.
+11. Optional enforcement dispatch is controlled by enforcement/dispatch.py and shadow-mode guardrails.
+```
+
+### Direct API scoring flow
+
+```text
+Dashboard TripScorer or API client
+  -> POST /fraud/score
+  -> api/inference.py
+  -> ml/stateless_scorer.py
+  -> model weights + Redis driver/zone features
+  -> tier + explanation response
+```
+
+### Case review flow
+
+```text
+Flagged case
+  -> GET /cases or /cases/summary/dashboard
+  -> Analyst.jsx
+  -> PATCH /cases/{case_id} or POST /cases/batch-review
+  -> database/case_store.py
+  -> KPI/report surfaces update from reviewed outcomes
+```
 
 ---
 
-## 6. Fraud Detection Model
+## 6. Tech Stack
+
+The versions below reflect `requirements.txt` and `dashboard-ui/package.json`.
+
+| Layer | Technology | Version in repo | Purpose |
+|---|---|---:|---|
+| API framework | FastAPI | 0.128.8 | Async REST API and OpenAPI docs |
+| ASGI server | Uvicorn | 0.27.1 | Local/prod API process |
+| ASGI toolkit | Starlette | 0.49.3 | FastAPI runtime base |
+| Data validation | Pydantic | 2.12.5 | Request/response schemas |
+| ML model | XGBoost | 2.1.4 | Binary fraud classifier |
+| Data science | pandas / numpy | 2.2.1 / 1.26.4 | Feature engineering and data transforms |
+| ML utilities | scikit-learn | 1.6.1 | Training/evaluation support |
+| Forecasting | Prophet | 1.1.5 | Demand models |
+| Database | PostgreSQL | compose uses 15-alpine | Case store and audit workflow |
+| Async DB driver | asyncpg | 0.29.0 | PostgreSQL async access |
+| ORM | SQLAlchemy | 2.0.28 | Async sessions and models |
+| Cache / streams | Redis | compose uses 7-alpine | Stream queue, feature cache, rate state |
+| Redis client | redis-py | 5.0.1 | Python Redis access |
+| Auth crypto | python-jose / passlib / bcrypt | 3.5.0 / 1.7.4 / 4.0.1 | JWT and password hashing |
+| PII encryption | cryptography | 46.0.7 | AES-GCM helpers |
+| PDF generation | reportlab | 4.2.0 | Board packs and legal PDFs |
+| Rate limiting | slowapi | 0.1.9 | Per-route limits |
+| Scheduler | APScheduler | 3.10.4 | Drift and lag jobs |
+| Metrics | prometheus_client | 0.20.0 | `/metrics` endpoint |
+| Frontend | React | 19.2.4 | Dashboard UI |
+| Frontend routing | react-router-dom | 7.13.2 | Dashboard routes |
+| Build tool | Vite | 8.0.8 | Frontend dev/build |
+| Maps | Leaflet | 1.9.4 | Map visualization |
+| Containerization | Docker / Compose | repo config | Local/prod packaging |
+| Observability | Prometheus + Grafana | repo config | Metrics and dashboards |
+
+---
+
+## 7. Fraud Detection Model
 
 ### Model type
 
-**XGBoost binary classifier** — gradient-boosted decision trees. Chosen over neural networks for:
-- Explainability (SHAP feature importance directly from tree splits)
-- Tabular data performance (XGBoost consistently outperforms deep learning on structured trip data)
-- Training speed and auditability
-- Robust handling of missing values and mixed-type features
+The fraud model is an **XGBoost binary classifier** loaded from:
 
-### Training configuration
+```text
+model/weights/xgb_fraud_model.json
+```
 
-| Parameter | Value |
+It predicts:
+
+```text
+fraud_probability in [0.0, 1.0]
+```
+
+XGBoost is used because the input data is structured tabular behavior: distances, fare ratios, temporal features, GPS integrity, driver profile, payment flags, and zone-level rates.
+
+### Model source files
+
+| File | Role |
 |---|---|
-| `n_estimators` | 400 |
-| `max_depth` | 6 |
-| `learning_rate` | 0.08 |
-| `subsample` | 0.8 |
-| `colsample_bytree` | 0.8 |
-| `min_child_weight` | 5 |
-| `scale_pos_weight` | 16 (class imbalance correction) |
-| `eval_metric` | `aucpr` (area under precision-recall curve) |
-| `early_stopping_rounds` | 30 |
-
-The `scale_pos_weight` of 16 reflects the approximately 1:16 fraud:clean ratio in training data. Without this correction, the model would learn to output low probabilities uniformly to minimise log-loss.
+| `model/features.py` | Training-time feature construction and canonical `FEATURE_COLUMNS` list. |
+| `model/train.py` | Training pipeline and model artifact generation. |
+| `model/evaluate.py` | Benchmark/evaluation support. |
+| `model/scoring.py` | Tier logic and threshold loading. |
+| `ml/stateless_scorer.py` | Runtime single-trip vector builder and scoring path. |
+| `ml/feature_store.py` | Redis-backed driver/zone feature lookup and precompute helpers. |
+| `model/weights/xgb_fraud_model.json` | Current XGBoost fraud model. |
+| `model/weights/feature_names.json` | Runtime feature order expected by the model. |
+| `model/weights/two_stage_config.json` | Action/watchlist/clear thresholds and benchmark metadata. |
+| `model/weights/threshold.json` | Legacy single-threshold artifact. Not the tier source of truth. |
+| `model/weights/demand_models.pkl` | Demand forecasting models. |
 
 ### Two-stage tier system
 
-```
-XGBoost output: fraud_probability ∈ [0.0, 1.0]
-                        │
-           ┌────────────┼────────────┐
-           │            │            │
-         ≥ 0.80       ≥ 0.50      < 0.50
-           │            │            │
-        ACTION      WATCHLIST      CLEAR
-     Enforcement   Analyst queue   No action
-      dispatch     (manual review) logged
+Current threshold source:
+
+```text
+model/weights/two_stage_config.json
 ```
 
-- **Action tier (≥0.80):** High confidence. Enforcement webhook fires immediately. Analyst can review post-facto.
-- **Watchlist tier (≥0.50, <0.80):** Ambiguous. Queued for analyst review. No automatic action.
-- **Clear (<0.50):** Logged as clean. No queue entry created.
+```text
+XGBoost fraud_probability
+          |
+          +-- >= 0.80 -> action
+          |
+          +-- >= 0.50 -> watchlist
+          |
+          +-- <  0.50 -> clear
+```
 
-The threshold values are configured in `model/weights/two_stage_config.json` (ground truth). The current defaults (0.50 / 0.80) were calibrated on the synthetic benchmark to maximise confirmed-fraud throughput while keeping FPR below 1%.
+| Tier | Condition | Operational meaning |
+|---|---:|---|
+| `action` | `fraud_probability >= 0.80` | High-confidence fraud. Eligible for investigation/enforcement path. |
+| `watchlist` | `0.50 <= fraud_probability < 0.80` | Needs analyst review or monitoring. |
+| `clear` | `fraud_probability < 0.50` | No fraud action. |
 
-### Model files
+### Benchmark metadata currently stored in `two_stage_config.json`
 
-| File | Purpose |
-|---|---|
-| `model/fraud_model.ubj` | Trained XGBoost model (binary format) |
-| `model/features.py` | Canonical `FEATURE_COLUMNS` list (31 features) |
-| `model/query.py` | Model loading, scoring, feature validation |
-| `ml/stateless_scorer.py` | Stateless `score_trip()` for Redis Stream worker |
+These are synthetic benchmark / digital twin numbers, not live production claims.
 
-### Inference path
+| Metric | Value |
+|---|---:|
+| Synthetic benchmark trips | 8,000 |
+| Synthetic benchmark fraud trips | 540 |
+| Synthetic benchmark action precision | 96.49% |
+| Synthetic benchmark action FPR | 0.13% |
+| Synthetic benchmark fraud caught | 82.6% |
+| Synthetic benchmark net recoverable per trip | INR 6.85 |
+| Digital twin trips | 1,296,000 |
+| Digital twin fraud trips | 55,146 |
+| Digital twin fraud rate | 4.26% |
+| Digital twin action precision | 85.26% |
+| Digital twin action recall | 85.88% |
+| Digital twin action FPR | 0.66% |
+| Digital twin combined recall | 88.19% |
 
-1. `score_trip(trip_dict)` called from Redis Stream consumer
-2. `build_feature_vector(trip_dict)` maps raw trip fields to all 31 FEATURE_COLUMNS
-3. Vector assembled as `pd.DataFrame` with exact column order
-4. `model.predict_proba(df)[0][1]` → fraud probability
-5. Tier assigned, case written to DB
+Digital twin subgroup FPR:
+
+| Subgroup | FPR |
+|---|---:|
+| Surge trips | 0.59% |
+| New driver trips | 0.65% |
+| Night trips | 1.46% |
+| Cargo trips | 2.03% |
+| Overall | 0.66% |
+
+Important disclosure: these validation numbers come from synthetic benchmark and digital twin data. Real company data validation should happen in shadow mode before enforcement is enabled.
 
 ---
 
-## 7. Feature Engineering — 31 Features
+## 8. Feature Engineering - 44 Features
 
-All 31 features are defined in `model/features.py` as `FEATURE_COLUMNS`. The feature vector is built in `ml/stateless_scorer.py::build_feature_vector()`.
+The current model contract is **44 features**, not 31.
 
-### Trip Economics (7 features)
+The three files that must stay synchronized are:
 
-| Feature | Description |
+1. `model/features.py`
+2. `model/weights/feature_names.json`
+3. `ml/stateless_scorer.py`
+
+If any feature is added, removed, renamed, or reordered in one of these files without updating the others, runtime scoring can silently degrade or fail.
+
+### Full feature list
+
+| # | Feature | Group | Meaning |
+|---:|---|---|---|
+| 1 | `declared_distance_km` | Trip economics/geometry | Declared trip distance. |
+| 2 | `actual_trip_duration_mins` | Timing | Actual duration in minutes. Runtime also supports older `declared_duration_min` fallback. |
+| 3 | `fare_inr` | Trip economics | Total fare in INR. |
+| 4 | `surge_multiplier` | Trip economics | Surge multiplier applied to fare expectation. |
+| 5 | `zone_demand_at_time` | Zone context | Demand index around pickup time. |
+| 6 | `fare_to_expected_ratio` | Derived economics | Actual fare divided by expected fare after surge adjustment. |
+| 7 | `distance_time_ratio` | Derived timing | Distance divided by duration. High values can indicate impossible speed. |
+| 8 | `fare_per_km` | Derived economics | Fare density per kilometer. |
+| 9 | `pickup_dropoff_haversine_km` | Geometry | Straight-line pickup-to-dropoff distance. |
+| 10 | `distance_vs_haversine_ratio` | Geometry | GPS/declared distance relative to straight-line distance. |
+| 11 | `gps_ping_count` | GPS integrity | Low ping count can indicate spoofing or incomplete telemetry. |
+| 12 | `gps_accuracy_avg_m` | GPS integrity | Suspiciously perfect or poor GPS accuracy signal. |
+| 13 | `mock_location_flag` | GPS integrity | Device mock-location indicator. |
+| 14 | `gps_provider_encoded` | GPS integrity | Encoded provider: GPS/network/mock. |
+| 15 | `avg_speed_kmh` | GPS/timing | Average trip speed. |
+| 16 | `max_speed_kmh` | GPS/timing | Maximum recorded speed. |
+| 17 | `waiting_time_mins` | Timing | Waiting time before or during trip. |
+| 18 | `loading_time_mins` | Porter logistics signal | Loading time for goods movement. |
+| 19 | `loading_anomaly_score` | Porter logistics signal | Loading time normalized against goods-category p75 norm. |
+| 20 | `pod_photo_captured` | POD integrity | Whether proof-of-delivery photo exists. |
+| 21 | `pod_location_match` | POD integrity | Whether POD location matches expected dropoff. |
+| 22 | `otp_verified` | OTP integrity | Whether OTP verification succeeded. |
+| 23 | `otp_attempt_count` | OTP integrity | Number of OTP attempts. |
+| 24 | `hour_of_day` | Temporal | Hour from 0 to 23. |
+| 25 | `day_of_week` | Temporal | Day of week. |
+| 26 | `is_night` | Temporal | Night trip flag. |
+| 27 | `is_peak_hour` | Temporal | Peak-hour flag. |
+| 28 | `is_friday` | Temporal | Friday flag. |
+| 29 | `is_late_month` | Temporal | Day-of-month incentive-window flag. |
+| 30 | `payment_is_cash` | Payment | Cash payment flag. |
+| 31 | `payment_is_credit` | Payment | Credit/card payment flag. |
+| 32 | `driver_cancellation_velocity_1hr` | Driver behavior | Recent cancellation count in one-hour window. |
+| 33 | `driver_cancel_rate_rolling_7d` | Driver behavior | Rolling 7-day cancellation rate. |
+| 34 | `driver_dispute_rate_rolling_14d` | Driver behavior | Rolling 14-day dispute rate. |
+| 35 | `driver_trips_last_24hr` | Driver behavior | Recent trip volume. |
+| 36 | `driver_cash_trip_ratio_7d` | Driver behavior | Rolling cash-trip ratio. |
+| 37 | `driver_account_age_days` | Driver profile | Account age. |
+| 38 | `driver_rating` | Driver profile | Driver rating. |
+| 39 | `driver_lifetime_trips` | Driver profile | Lifetime trip count. |
+| 40 | `driver_verification_encoded` | Driver profile | Encoded verification state. |
+| 41 | `driver_payment_type_encoded` | Driver profile | Encoded driver payment preference/account type. |
+| 42 | `zone_fraud_rate_rolling_7d` | Zone context | Historical fraud rate for pickup zone. |
+| 43 | `same_zone_trip` | Zone context | Pickup/dropoff zone equality flag. |
+| 44 | `is_cancelled` | Status | Cancellation status flag. |
+
+### Feature groups
+
+| Group | Features |
 |---|---|
-| `declared_distance_km` | Declared trip distance |
-| `declared_duration_min` | Declared trip duration |
-| `fare_inr` | Total fare in Indian Rupees |
-| `surge_multiplier` | Surge pricing factor applied |
-| `fare_to_expected_ratio` | Actual fare divided by zone-expected fare |
-| `fare_per_km` | Per-kilometre fare rate |
-| `zone_demand_at_time` | Demand index in pickup zone at trip time |
+| Trip economics | `fare_inr`, `surge_multiplier`, `fare_to_expected_ratio`, `fare_per_km`, `zone_demand_at_time` |
+| Geometry | `declared_distance_km`, `pickup_dropoff_haversine_km`, `distance_vs_haversine_ratio` |
+| Timing | `actual_trip_duration_mins`, `distance_time_ratio`, `waiting_time_mins`, temporal flags |
+| GPS integrity | ping count, accuracy, mock location, provider, speed fields |
+| POD / OTP | proof-of-delivery and OTP verification fields |
+| Payment | cash and credit flags |
+| Driver behavior | cancellation, dispute, trip velocity, cash-ratio history |
+| Driver profile | account age, rating, lifetime trips, verification, payment type |
+| Zone and status | zone fraud rate, same-zone flag, cancellation flag |
 
-### Trip Geometry (3 features)
+### Runtime feature construction
 
-| Feature | Description |
-|---|---|
-| `pickup_dropoff_haversine_km` | Straight-line distance between pickup and dropoff |
-| `distance_vs_haversine_ratio` | Declared distance divided by haversine (detour ratio) |
-| `distance_time_ratio` | km per minute — implausibly high values flag ghost trips |
+`ml/stateless_scorer.py::build_feature_vector()` builds the scoring vector without a pandas DataFrame. It receives:
 
-### Temporal Signals (6 features)
+```text
+trip dict
+driver_features dict
+zone_features dict
+feature_names list
+```
 
-| Feature | Description |
-|---|---|
-| `hour_of_day` | 0–23, captures time-of-day fraud patterns |
-| `day_of_week` | 0–6, Mon=0 |
-| `is_night` | 1 if 22:00–05:00 |
-| `is_peak_hour` | 1 if 07:00–10:00 or 17:00–21:00 |
-| `is_friday` | 1 if Friday (high surge abuse day) |
-| `is_late_month` | 1 if day ≥ 25 (incentive-window abuse) |
+Then it:
 
-### Payment Signals (2 features)
-
-| Feature | Description |
-|---|---|
-| `payment_is_cash` | 1 if cash payment (harder to trace, higher fraud rate) |
-| `payment_is_credit` | 1 if credit card |
-
-### Driver History (8 features)
-
-| Feature | Description |
-|---|---|
-| `driver_cancellation_velocity_1hr` | Cancellations in last 1 hour |
-| `driver_cancel_rate_rolling_7d` | 7-day rolling cancellation rate |
-| `driver_dispute_rate_rolling_14d` | 14-day rolling dispute rate |
-| `driver_trips_last_24hr` | Trip count in last 24 hours |
-| `driver_cash_trip_ratio_7d` | Fraction of cash trips in last 7 days |
-| `driver_account_age_days` | Days since driver account creation |
-| `driver_rating` | Driver rating (1.0–5.0) |
-| `driver_lifetime_trips` | Total completed trips (career) |
-
-### Driver Classification (2 features)
-
-| Feature | Description |
-|---|---|
-| `driver_verification_encoded` | Verification tier (0=unverified, 1=basic, 2=full) |
-| `driver_payment_type_encoded` | Payment type preference encoding |
-
-### Zone and Trip Context (3 features)
-
-| Feature | Description |
-|---|---|
-| `zone_fraud_rate_rolling_7d` | Fraud rate in pickup zone over last 7 days |
-| `same_zone_trip` | 1 if pickup and dropoff in same zone (short-haul indicator) |
-| `is_cancelled` | 1 if trip was cancelled (ghost trip pattern) |
-
-### Top 7 features by importance (SHAP, pilot dataset)
-
-1. `fare_to_expected_ratio` — single strongest signal; legitimate trips rarely exceed 2× expected
-2. `driver_cancellation_velocity_1hr` — burst cancellations correlate with incentive farming
-3. `distance_vs_haversine_ratio` — extreme detour ratios flag route manipulation
-4. `zone_fraud_rate_rolling_7d` — zone context amplifies individual trip signals
-5. `driver_cash_trip_ratio_7d` — cash-heavy patterns tied to ghost trip rings
-6. `driver_dispute_rate_rolling_14d` — sustained disputes indicate systematic fraud
-7. `is_cancelled` — cancelled trips with fare logged are a known fraud pattern
+1. Computes direct trip fields.
+2. Computes haversine distance.
+3. Computes fare expectation using `generator.config.VEHICLE_TYPES`.
+4. Computes fare/distance/time ratios.
+5. Encodes payment and GPS provider fields.
+6. Reads driver/zone features from Redis feature store.
+7. Outputs a `numpy.float32` vector in `feature_names.json` order.
 
 ---
 
-## 8. Ingestion Pipeline
+## 9. Data Files And Data Provenance
 
-Porter accepts trip data through three entry points, all normalised through the same schema mapper before entering the Redis Stream.
+### Active data files in this working tree
 
-### Entry points
+| Path | Purpose |
+|---|---|
+| `data/raw/drivers_sample_1000.csv` | Driver sample used by startup loaders and model/dashboards. |
+| `data/raw/trips_with_fraud_10k.csv` | Benchmark trips with fraud labels. Loaded by startup if full export is absent. |
+| `data/raw/evaluation_report.json` | Evaluation/benchmark report consumed by KPI/report endpoints. |
+| `data/raw/hard_negatives.csv` | Hard negative examples used to reduce false positives. |
+| `data/raw/trips_sample_5k.csv` | Additional generated sample trip file. |
+| `data/raw/trips_fraud_v2_sample.csv` | V2 fraud sample file. |
+| `data/samples/porter_sample_10_trips.csv` | Small portable sample for demos/tests. |
+| `data/masked/.gitkeep` | Placeholder for masked data exports. |
+| `data/blind_test/` | Local blind-test area. Full CSVs are ignored by `.gitignore`. |
 
-| Source | Endpoint | Use case |
+Some full-scale data files are intentionally ignored by Git:
+
+```text
+data/raw/trips_full.csv
+data/raw/trips_full_fraud.csv
+data/raw/drivers_full.csv
+data/raw/customers_full.csv
+data/masked/*.csv
+data/blind_test/*.csv
+```
+
+### Startup data loading order
+
+`api/state.py` loads trip data in this order:
+
+```text
+data/raw/trips_full_fraud.csv
+data/raw/trips_with_fraud_10k.csv
+```
+
+It loads driver data in this order:
+
+```text
+data/raw/drivers_full.csv
+data/raw/drivers_sample_1000.csv
+```
+
+If those files are absent, the app can still boot in a degraded/CSV-empty mode, but many dashboard surfaces will show fallback or empty-state data.
+
+### Provenance labels
+
+`runtime_config.py::describe_data_provenance()` describes the active data mode for `/health`:
+
+| Runtime condition | Data provenance text |
+|---|---|
+| synthetic feed enabled | Synthetic demo feed persisted to PostgreSQL |
+| shadow mode enabled | Shadow-mode case records with writeback disabled |
+| production mode | Database-backed records from ingestion/shadow operation |
+| non-production mode | Database-backed records from non-production runtime |
+
+---
+
+## 10. Ingestion Pipeline
+
+### Live endpoints
+
+The actual ingestion endpoints are:
+
+| Method | Endpoint | Purpose |
 |---|---|---|
-| Webhook (live) | `POST /ingest/webhook` | Real-time trip completion events from city systems |
-| Batch CSV | `POST /ingest/batch` | Bulk historical upload (up to 10,000 trips) |
-| Live simulator | Internal scheduler | Synthetic stream for demos and validation |
+| `POST` | `/ingest/trip-completed` | Accept one trip completion event. |
+| `POST` | `/ingest/batch-csv` | Upload batch CSV data. |
+| `GET` | `/ingest/status` | Inspect ingestion/queue status. |
+| `GET` | `/ingest/schema-map/default` | Return the default schema map. |
+
+Older names such as `/ingest/webhook`, `/ingest/batch`, and `/ingest/queue-status` are not part of the current live route table.
+
+### Pipeline shape
+
+```text
+POST /ingest/trip-completed
+  -> ingestion/webhook.py
+  -> ingestion/schema_mapper.py
+  -> ingestion/schema_map.default.json
+  -> Redis Stream porter:trips
+  -> ingestion/streams.py
+  -> ml/stateless_scorer.py
+  -> database/case_store.py
+```
 
 ### Schema mapping
 
-Different city systems use different field names. The schema mapper normalises all inputs:
+`ingestion/schema_mapper.py` maps external or city-specific field names into the canonical trip schema. The default mapping lives in:
 
-```
-city system field           →   Porter canonical field
-─────────────────────────────────────────────────────
-"trip_dist" / "distance"    →   declared_distance_km
-"amt" / "total_fare"        →   fare_inr
-"driver_id" / "drv_id"      →   driver_id
-"pickup_lat" / "lat1"       →   pickup_lat
-...
+```text
+ingestion/schema_map.default.json
 ```
 
-Schema maps are stored in `ingestion/schema_map.default.json` and city-specific overrides in `ingestion/city_profiles.py`.
+If a payload cannot be normalized safely, staging/fallback code in `ingestion/staging.py` can preserve the event for later inspection instead of dropping it silently.
 
-If a required field is missing after mapping, the event is written to the **staging table** (`ingestion_staging`) with `status='pending'` for manual review or retry.
+### Redis stream worker
 
-### Redis Stream pipeline
-
-```
-Ingest API → XADD porter:trips <trip_fields>
-                                │
-                                ▼
-                    Scoring worker (XREAD blocking)
-                    │  build_feature_vector()
-                    │  xgb_model.predict_proba()
-                    │  write case to PostgreSQL
-                    └► XACK porter:trips scoring-workers <message-id>
-```
-
-At-least-once delivery: the worker only ACKs after the case is written to the database. If the worker crashes mid-processing, the message remains in the pending-entries list and will be redelivered on restart.
+The stream worker in `ingestion/streams.py` is the async processing path for queued trip events. It reads Redis Stream messages, scores them, persists flagged cases, and acknowledges after work completes.
 
 ### Live simulator
 
-`ingestion/live_simulator.py` generates a continuous stream of synthetic trips at a configurable rate. Used for:
-- Demo environments (dashboard live without real city data)
-- Load testing
-- Shadow mode validation
+`ingestion/live_simulator.py` is for demo and non-production flows. It publishes synthetic trip events into Redis. Runtime behavior is controlled by:
 
-Simulator trips are tagged with `source: synthetic` and use the city profile system to generate geographically plausible coordinates, fare ranges, and driver profiles.
+```text
+APP_RUNTIME_MODE
+ENABLE_SYNTHETIC_FEED
+PORTER_TWIN_TRIPS_PER_MIN
+PORTER_TWIN_SCALE_MULTIPLIER
+PORTER_TWIN_DAILY_GROWTH_PCT
+PORTER_TWIN_ELAPSED_DAYS
+PORTER_TWIN_ACTIVE_CITIES
+```
+
+In production mode, `runtime_config.py` forces `synthetic_feed_enabled = False` even if `ENABLE_SYNTHETIC_FEED=true` is present.
 
 ---
 
-## 9. Case Lifecycle
+## 11. Case Lifecycle
 
-Every trip that scores above the watchlist threshold (≥0.50) becomes a **case** in the PostgreSQL `cases` table.
+Cases are created for trips that require operational attention and are stored through:
 
-### Status machine
-
-```
-  PENDING  ──► UNDER_REVIEW ──► CONFIRMED  ──► (enforcement dispatched)
-                    │
-                    └──────────► CLEARED    ──► (no action, logged)
+```text
+database/case_store.py
+database/models.py
+api/routes/cases.py
 ```
 
-- **PENDING:** Case created automatically by scoring worker. No analyst assigned.
-- **UNDER_REVIEW:** Analyst claims the case. Case is now locked to that analyst (isolation prevents concurrent edits).
-- **CONFIRMED:** Analyst confirms fraud. Enforcement dispatch fires (unless shadow mode active).
-- **CLEARED:** Analyst determines false positive. No action. Logged for model feedback.
+### Live case endpoints
 
-### Analyst isolation
+| Method | Endpoint | Purpose |
+|---|---|---|
+| `GET` | `/cases` | List cases. |
+| `GET` | `/cases/` | List cases with trailing-slash compatibility. |
+| `GET` | `/cases/summary/counts` | Count summary. |
+| `GET` | `/cases/summary/dashboard` | Analyst/dashboard summary. |
+| `GET` | `/cases/{case_id}` | Fetch one case. |
+| `GET` | `/cases/{case_id}/history` | Fetch audit/history. |
+| `PATCH` | `/cases/{case_id}` | Update case status/details. |
+| `POST` | `/cases/{case_id}/driver-action` | Record driver action. |
+| `POST` | `/cases/batch-review` | Bulk review cases. |
 
-Only one analyst can hold a case in `UNDER_REVIEW` at a time. The `reviewed_by` field is set atomically with the status transition. Attempting to claim an already-claimed case returns HTTP 409 Conflict.
+### Operational status flow
+
+The exact persistence fields are defined in `database/models.py`, but conceptually the workflow is:
+
+```text
+flagged
+  -> pending analyst review
+  -> under review / reviewed
+  -> confirmed or cleared
+  -> audit history and KPI aggregation
+```
 
 ### Enforcement dispatch
 
-When a case is confirmed (or when a trip scores `action` tier at ingest time), Porter sends a webhook to the operator's dispatch system:
+Dispatch integration lives in:
 
-```json
-{
-  "driver_id": "DRV_12345",
-  "trip_id": "TRIP_98765",
-  "fraud_probability": 0.9847,
-  "tier": "action",
-  "top_signals": [
-    "fare_to_expected_ratio: 4.2 (threshold 2.0)",
-    "driver_cancellation_velocity_1hr: 8 (threshold 3)",
-    "zone_fraud_rate_rolling_7d: 0.31 (elevated)"
-  ],
-  "action": "suspend_driver"
-}
+```text
+enforcement/dispatch.py
 ```
 
-The dispatch URL is configured via `PORTER_DISPATCH_URL` environment variable. If not set, dispatch is logged locally.
+The dispatch test route is:
 
-### Shadow cases
-
-In shadow mode, all cases are written to `shadow_cases` instead of `cases`. Enforcement webhook is suppressed. `live_write_suppressed: true` is set on the response. This lets operators validate Porter's decisions against their own ground truth before going live.
-
----
-
-## 10. Driver Intelligence
-
-The driver intelligence module builds a comprehensive risk profile for each driver, surfaced via the `/intelligence/driver/{driver_id}` endpoint.
-
-### Components
-
-**30-day risk timeline**
-Plots fraud score over the last 30 days, smoothed with a 3-day rolling average. Enables detection of gradual drift vs. sudden spike patterns.
-
-**Ring detection**
-Identifies clusters of drivers operating together:
-- Shared pickup/dropoff coordinates (within 200m tolerance)
-- Synchronized trip patterns (trips within 5-minute windows)
-- Payment method correlation (shared cash accounts)
-- Zone co-occurrence above expected chance level
-
-**Peer comparison**
-Compares a driver's metrics against their cohort (same city, same vehicle class, similar tenure):
-- `dispute_rate_vs_cohort`: percentile rank among peers
-- `cash_trip_ratio_vs_cohort`: how far above/below peer average
-- `cancellation_velocity_vs_cohort`: outlier detection
-
-**Signals tracked**
-- Cancellation velocity (1hr, 24hr, 7-day rolling)
-- Dispute rate (14-day, 30-day rolling)
-- Cash trip ratio (7-day rolling)
-- Ghost trip indicators (cancelled trips with fare logged)
-- Zone concentration (operating exclusively in high-fraud zones)
-
----
-
-## 11. Demand Forecasting
-
-Porter uses Facebook Prophet to forecast demand per zone with a 24-hour horizon. This feeds the surge prediction and route efficiency modules.
-
-### Model per zone
-
-A separate Prophet model is trained for each city zone. Zones with insufficient history fall back to a city-level aggregate model.
-
-**Seasonality components:**
-- Daily (rush hours, night lows)
-- Weekly (weekday vs. weekend patterns)
-- Custom (payday spikes on 1st and 15th of month)
-
-### Surge prediction
-
-The system predicts surge multipliers by combining:
-1. Demand forecast (Prophet output)
-2. Active driver count at time T (from recent trip completions)
-3. Historical surge ratios for the zone × hour combination
-
-Surge alerts are triggered when predicted demand/supply ratio exceeds 2.5×.
-
-### Outputs
-
-- `GET /kpi/forecast` — next 24-hour demand forecast per zone
-- `GET /kpi/surge-alerts` — current active and predicted surge zones
-- Used by route efficiency engine to recommend pre-positioning
-
----
-
-## 12. Route Efficiency
-
-The route efficiency module analyses fleet utilisation patterns to identify and quantify inefficiency.
-
-### Dead mile analysis
-
-"Dead miles" are kilometres driven without a passenger. High dead-mile ratios indicate:
-- Poor pre-positioning (drivers clustered in low-demand zones)
-- Systematic cancellations (driver drives to pickup, cancels)
-- Zone avoidance behaviours
-
-### Vehicle utilisation scoring
-
-Each driver receives a utilisation score (0–100):
-- Trips per hour online
-- Fare-per-kilometre vs. zone average
-- Peak hour availability
-- Dead mile ratio
-
-### Reallocation recommendations
-
-The engine produces `GET /route/reallocation` recommendations — a list of zones currently over/under-supplied relative to forecast demand, with suggested driver counts to move.
-
----
-
-## 13. Security Architecture
-
-### Authentication
-
-**JWT HS256** tokens issued at login (`POST /auth/login`). Token payload:
-```json
-{
-  "sub": "analyst_001",
-  "role": "ops_analyst",
-  "exp": 1735689600
-}
+```text
+POST /webhooks/dispatch/test
 ```
 
-Token secret: `SECRET_KEY` env var (minimum 32 characters, validated at startup).
+The downstream URL is configured by:
 
-### Role-based access control (4 roles)
+```text
+PORTER_DISPATCH_URL
+```
 
-| Role | Permissions | Typical user |
+If `PORTER_DISPATCH_URL` is missing, dispatch is skipped/logged rather than calling an unknown external system. Shadow mode also suppresses operational writeback.
+
+---
+
+## 12. Driver Intelligence
+
+Driver intelligence surfaces are implemented by:
+
+```text
+api/routes/driver_intelligence.py
+model/driver_intelligence.py
+```
+
+Live endpoints:
+
+| Method | Endpoint | Purpose |
 |---|---|---|
-| `admin` | All — including `read:all`, `write:cases`, `manage:users` | Platform owner |
-| `ops_analyst` | `read:cases`, `write:cases`, `read:reports` | Fraud analyst |
-| `city_ops` | `read:cases`, `read:reports` (own city only) | City operations manager |
-| `read_only` | `read:reports` | Executive, auditor |
+| `GET` | `/intelligence/top-risk` | Top-risk drivers. |
+| `GET` | `/intelligence/driver/{driver_id}` | Driver detail view. |
+| `GET` | `/fraud/driver/{driver_id}` | Fraud-oriented driver scoring surface from inference module. |
 
-`require_permission("perm")` is a FastAPI dependency injected on protected routes. Attempting to call a route without the required permission returns HTTP 403.
+Signals used across driver intelligence and scoring:
+
+- Rolling cancellation rate.
+- Rolling dispute rate.
+- 24-hour trip count.
+- Cash trip ratio.
+- Account age.
+- Rating.
+- Lifetime trips.
+- Verification encoding.
+- Payment type encoding.
+- Zone fraud rate.
+
+The dashboard consumes top-risk driver data through `dashboard-ui/src/components/DriverIntelligence.jsx` and the analyst workspace uses the same surface to populate driver quick-picks.
+
+---
+
+## 13. Demand Forecasting
+
+Demand forecasting lives in:
+
+```text
+model/demand.py
+model/weights/demand_models.pkl
+api/inference.py
+```
+
+Live endpoint:
+
+```text
+GET /demand/forecast/{zone_id}
+```
+
+Startup loading happens in `api/state.py`:
+
+```text
+from model.demand import load_demand_models
+```
+
+If demand models are absent, startup logs that no demand models were found and the app continues. This is intentional so the fraud/case workflow can run even if forecasting artifacts are not generated in a local environment.
+
+---
+
+## 14. Route Efficiency
+
+Route efficiency lives in:
+
+```text
+api/routes/route_efficiency.py
+model/route_efficiency.py
+```
+
+Live endpoints:
+
+| Method | Endpoint | Purpose |
+|---|---|---|
+| `GET` | `/efficiency/summary` | Efficiency summary. |
+| `GET` | `/efficiency/reallocation` | Reallocation recommendations. |
+| `GET` | `/efficiency/dead-miles` | Dead-mile analysis. |
+| `GET` | `/efficiency/fleet-zones` | Fleet zone view. |
+| `GET` | `/efficiency/utilisation/{zone_id}` | Zone-level utilisation. |
+
+Startup can precompute a route-efficiency cache from loaded trip CSVs and write it to Redis with key:
+
+```text
+route-efficiency:bootstrap
+```
+
+The frontend route-efficiency panel is:
+
+```text
+dashboard-ui/src/components/ReallocationPanel.jsx
+```
+
+---
+
+## 15. Security Architecture
+
+### Auth flow
+
+Current login endpoint:
+
+```text
+POST /auth/token
+```
+
+It expects `application/x-www-form-urlencoded` fields:
+
+```text
+username=<username>
+password=<password>
+```
+
+It does **not** use `/auth/login` in the current codebase.
+
+Seed users are configured in `auth/config.py`:
+
+| Username | Env var | Role | Display name |
+|---|---|---|---|
+| `admin` | `PORTER_AUTH_ADMIN_PASSWORD` | `admin` | Platform Administrator |
+| `ops_manager` | `PORTER_AUTH_OPS_MANAGER_PASSWORD` | `ops_manager` | Operations Manager |
+| `analyst_1` | `PORTER_AUTH_ANALYST_PASSWORD` | `ops_analyst` | Fraud Analyst |
+| `viewer` | `PORTER_AUTH_VIEWER_PASSWORD` | `read_only` | Dashboard Viewer |
+
+### Roles and permissions
+
+Source of truth:
+
+```text
+auth/models.py
+```
+
+| Role | Permissions |
+|---|---|
+| `admin` | `read:all`, `write:all`, `delete:all`, `manage:users` |
+| `ops_manager` | `read:all`, `write:cases`, `write:driver_actions`, `read:reports` |
+| `ops_analyst` | `read:cases`, `read:kpi`, `read:drivers`, `write:case_status`, `write:case_notes`, `write:driver_actions` |
+| `read_only` | `read:dashboard`, `read:kpi` |
+
+### Secrets and runtime validation
+
+Security validation lives in:
+
+```text
+security/settings.py
+```
+
+Production mode rejects missing or placeholder values for required secrets.
+
+| Variable | Purpose |
+|---|---|
+| `JWT_SECRET_KEY` | JWT signing secret. |
+| `ENCRYPTION_KEY` | PII encryption key. |
+| `WEBHOOK_SECRET` | Webhook signature verification secret. |
+| `API_ALLOWED_ORIGINS` | CORS allowed origins. |
+| `PORTER_AUTH_ADMIN_PASSWORD` | Admin seed password. |
+| `PORTER_AUTH_OPS_MANAGER_PASSWORD` | Ops manager seed password. |
+| `PORTER_AUTH_ANALYST_PASSWORD` | Analyst seed password. |
+| `PORTER_AUTH_VIEWER_PASSWORD` | Viewer seed password. |
+
+Stale env names:
+
+| Stale name | Current name |
+|---|---|
+| `SECRET_KEY` | `JWT_SECRET_KEY` |
+| `ALLOWED_ORIGINS` | `API_ALLOWED_ORIGINS` |
+| `RUNTIME_MODE` | `APP_RUNTIME_MODE` / `APP_ENV` |
+
+### Webhook signatures
+
+`security/settings.py::require_webhook_signature()` requires webhook signatures in production mode. In non-production, unsigned webhook behavior can be controlled with:
+
+```text
+ALLOW_UNSIGNED_WEBHOOKS
+```
 
 ### PII encryption
 
-All Personally Identifiable Information stored in the database is encrypted at rest using **AES-256-GCM**:
-- `driver_name`
-- `driver_phone`
-- `passenger_name`
-- `passenger_phone`
+PII encryption helpers live in:
 
-Encryption key: `ENCRYPTION_KEY` env var. The `security/encryption.py` module provides `encrypt_field()` and `decrypt_field()` helpers used by all model read/write paths.
+```text
+security/encryption.py
+```
 
-### Rate limiting
+Plaintext PII is not allowed in production mode. Demo plaintext behavior is guarded by:
 
-slowapi rate limits are applied per endpoint:
-- `/auth/login`: 10 requests/minute (brute-force protection)
-- `/fraud/score`: 100 requests/minute
-- `/ingest/webhook`: 500 requests/minute (bulk ingest paths)
+```text
+ALLOW_PLAINTEXT_PII
+```
 
 ### Security headers
 
-All responses include:
-- `X-Content-Type-Options: nosniff`
-- `X-Frame-Options: DENY`
-- `X-XSS-Protection: 1; mode=block`
-- `Referrer-Policy: strict-origin-when-cross-origin`
+`api/main.py` adds:
 
-### CORS
-
-Allowed origins are loaded from `security/settings.py::get_allowed_origins()`, which reads `ALLOWED_ORIGINS` env var (comma-separated list). Defaults to `http://localhost:5173` for local development.
-
----
-
-## 14. Shadow Mode
-
-Shadow mode is Porter's safety mechanism for initial deployment. The platform runs fully — scoring, casing, intelligence — but enforcement is suppressed.
-
-### What changes in shadow mode
-
-| Component | Normal mode | Shadow mode |
-|---|---|---|
-| Scoring | Active | Active (unchanged) |
-| Case creation | `cases` table | `shadow_cases` table |
-| Enforcement dispatch | Fires webhook | Suppressed — logged only |
-| Analyst review | Full workflow | Read-only view available |
-| KPI reporting | Live reviewed data | Shadow data (separate) |
-
-### Activation
-
-```bash
-POST /shadow/activate
-Authorization: Bearer <admin_token>
+```text
+X-Content-Type-Options: nosniff
+X-Frame-Options: DENY
+X-XSS-Protection: 1; mode=block
+Referrer-Policy: strict-origin-when-cross-origin
 ```
 
-This sets `app_state["shadow_mode"] = True`. The `/health` endpoint reports `shadow_mode: true` so operators can confirm the state.
-
-### Validation workflow
-
-Recommended shadow mode process:
-1. Activate shadow mode
-2. Run ingestion for 30 days (real or synthetic)
-3. Compare Porter's decisions against manual review outcomes
-4. Once precision target (≥70% confirmed cases) is reached, deactivate shadow mode
-5. Go live with enforcement
-
-The acceptance criteria for deactivation are documented in `docs/handover/acceptance-criteria.md`.
-
 ---
 
-## 15. Digital Twin (Synthetic Data Engine)
+## 16. Shadow Mode
 
-The digital twin is a complete synthetic trip generator that produces realistic fraud and clean trips for any of 22 Indian cities.
+Shadow mode is the safe deployment path for real operational validation. It lets the platform score and persist reviewable decisions while suppressing external writeback/enforcement.
 
-### Coverage
+Runtime flag:
 
-**22 cities:** Mumbai, Delhi, Bangalore, Chennai, Hyderabad, Pune, Kolkata, Ahmedabad, Surat, Jaipur, Lucknow, Kanpur, Nagpur, Indore, Thane, Bhopal, Visakhapatnam, Patna, Vadodara, Ghaziabad, Ludhiana, Agra.
+```text
+SHADOW_MODE=true
+```
 
-### Fraud archetypes (5 patterns)
+Live endpoints:
 
-| Archetype | Description | Key signals |
+| Method | Endpoint | Purpose |
 |---|---|---|
-| **Ghost trip** | Trip logged but never driven | `is_cancelled=1`, `distance_vs_haversine_ratio` near 0 |
-| **Fare manipulation** | Fare charged above metered rate | `fare_to_expected_ratio` > 2.5 |
-| **Surge abuse** | Fake demand spike to trigger surge | High `zone_demand_at_time`, multiple same-zone trips |
-| **Incentive farming** | Collusion to hit bonus thresholds | `driver_cancellation_velocity_1hr` burst, `is_late_month=1` |
-| **Ring operation** | Coordinated multi-driver fraud | Shared zone, synchronized timing, correlated cash ratio |
+| `GET` | `/shadow/status` | Current shadow-mode status. |
+| `POST` | `/shadow/activate` | Activate shadow mode. |
+| `POST` | `/shadow/deactivate` | Deactivate shadow mode. |
 
-### Usage
+`/health` includes:
 
-The generator is accessed via `generator/config.py`. The live simulator (`ingestion/live_simulator.py`) uses it to produce a continuous stream of synthetic trips for demo and validation environments.
+```json
+{
+  "shadow_mode": true,
+  "data_provenance": "Shadow-mode case records persisted to isolated PostgreSQL storage with operational writeback disabled."
+}
+```
 
-A sample dataset of 10 trips is committed at `data/samples/porter_sample_10_trips.csv` for test fixture use.
+Recommended production rollout:
+
+1. Deploy with `APP_RUNTIME_MODE=prod`.
+2. Keep `SHADOW_MODE=true`.
+3. Connect real ingestion.
+4. Score real trips without enforcement writeback.
+5. Compare model flags against manual review outcomes.
+6. Calibrate thresholds if required.
+7. Disable shadow mode only after acceptance criteria are met.
 
 ---
 
-## 16. API Reference
+## 17. Digital Twin And Synthetic Data Engine
 
-All endpoints require authentication (`Authorization: Bearer <token>`) unless noted. Full interactive documentation available at `/docs` after startup.
+The synthetic data engine lives under:
+
+```text
+generator/
+ingestion/live_simulator.py
+ingestion/city_profiles.py
+```
+
+Core files:
+
+| File | Purpose |
+|---|---|
+| `generator/config.py` | Global generation constants, vehicle types, API title/version/description. |
+| `generator/cities.py` | City and zone helpers. |
+| `generator/customers.py` | Synthetic customer generation. |
+| `generator/drivers.py` | Synthetic driver generation. |
+| `generator/trips.py` | Synthetic trip generation. |
+| `generator/fraud.py` | Fraud injection engine. |
+| `generator/hard_negatives.py` | Hard-negative generation for false-positive control. |
+| `ingestion/live_simulator.py` | Demo stream publisher. |
+| `ingestion/city_profiles.py` | City profile definitions for simulator. |
+
+Fraud patterns represented in the current generator configuration include:
+
+- `cash_extortion`
+- `fake_trip`
+- `route_deviation`
+- `fake_cancellation`
+- `duplicate_trip`
+- `loading_fraud`
+- `partial_delivery`
+- `gps_spoof`
+
+Synthetic feed is for demos and validation only. Production mode disables it automatically.
+
+---
+
+## 18. Live API Surface
+
+The live API route table is registered through:
+
+```text
+api/router_registry.py
+```
+
+The contract is locked by:
+
+```text
+tests/test_api_contract.py
+```
 
 ### Core
 
-| Method | Endpoint | Auth | Description |
-|---|---|---|---|
-| `GET` | `/health` | None | Platform health, DB/Redis status, runtime mode |
-| `GET` | `/metrics` | None | Prometheus metrics scrape |
-| `POST` | `/webhooks/dispatch/test` | None | Test downstream dispatch connectivity |
+| Method | Endpoint | Description |
+|---|---|---|
+| `GET` | `/` | API metadata. |
+| `GET` | `/health` | Health, dependency, runtime, and security state. |
+| `GET` | `/metrics` | Prometheus metrics. |
+| `POST` | `/webhooks/dispatch/test` | Test downstream dispatch connectivity. |
 
-### Authentication
+### Auth
 
-| Method | Endpoint | Auth | Description |
-|---|---|---|---|
-| `POST` | `/auth/login` | None | Issue JWT token |
-| `GET` | `/auth/me` | Any | Current user info |
+| Method | Endpoint | Description |
+|---|---|---|
+| `POST` | `/auth/token` | Form login and JWT issuance. |
+| `GET` | `/auth/me` | Current user details. |
+| `GET` | `/auth/admin/users` | Admin user configuration surface. |
+| `POST` | `/auth/admin/users` | Admin user setup guidance. |
 
-### Fraud Scoring
+### Fraud and scoring
 
-| Method | Endpoint | Auth | Description |
-|---|---|---|---|
-| `POST` | `/fraud/score` | `ops_analyst` | Score a single trip |
-| `POST` | `/fraud/score-batch` | `ops_analyst` | Score up to 100 trips |
-| `GET` | `/fraud/evaluate` | `ops_analyst` | Score all trips in loaded dataset |
+| Method | Endpoint | Description |
+|---|---|---|
+| `POST` | `/fraud/score` | Score one trip. |
+| `GET` | `/fraud/heatmap` | Zone fraud heatmap. |
+| `GET` | `/fraud/live-feed` | Recent fraud feed. |
+| `GET` | `/fraud/tier-summary` | Two-stage tier summary. |
+| `GET` | `/fraud/driver/{driver_id}` | Driver fraud detail from inference surface. |
 
 ### Cases
 
-| Method | Endpoint | Auth | Description |
-|---|---|---|---|
-| `GET` | `/cases/` | `ops_analyst` | List cases (paginated, filterable by tier/status) |
-| `POST` | `/cases/{id}/review` | `ops_analyst` | Claim case for review |
-| `POST` | `/cases/{id}/confirm` | `ops_analyst` | Confirm fraud (triggers dispatch) |
-| `POST` | `/cases/{id}/clear` | `ops_analyst` | Clear case as false positive |
-| `POST` | `/cases/bulk-action` | `ops_analyst` | Bulk confirm/clear up to 50 cases |
+| Method | Endpoint | Description |
+|---|---|---|
+| `GET` | `/cases` | List cases. |
+| `GET` | `/cases/` | List cases with trailing slash. |
+| `GET` | `/cases/summary/counts` | Case count summary. |
+| `GET` | `/cases/summary/dashboard` | Dashboard case summary. |
+| `GET` | `/cases/{case_id}` | Fetch one case. |
+| `PATCH` | `/cases/{case_id}` | Update one case. |
+| `GET` | `/cases/{case_id}/history` | Case audit history. |
+| `POST` | `/cases/{case_id}/driver-action` | Record driver action. |
+| `POST` | `/cases/batch-review` | Bulk case review. |
 
-### Driver Intelligence
+### KPI, reports, ROI, legal
 
-| Method | Endpoint | Auth | Description |
-|---|---|---|---|
-| `GET` | `/intelligence/driver/{driver_id}` | `ops_analyst` | Full driver risk profile |
-| `GET` | `/intelligence/rings` | `admin` | Detected collaboration rings |
-| `GET` | `/intelligence/top-risk` | `ops_analyst` | Top 20 highest-risk drivers |
+| Method | Endpoint | Description |
+|---|---|---|
+| `GET` | `/kpi/live` | Live KPI panel. |
+| `GET` | `/kpi/summary` | KPI summary from inference module. |
+| `GET` | `/kpi/report` | Sanitized model/KPI report. |
+| `GET` | `/reports/board-pack` | Board-pack PDF. |
+| `GET` | `/reports/daily-summary` | Daily summary. |
+| `GET` | `/reports/model-performance` | Model performance report. |
+| `POST` | `/roi/calculate` | ROI calculation. |
+| `GET` | `/roi/summary` | ROI summary. |
+| `GET` | `/legal/download` | Full legal close packet. |
+| `GET` | `/legal/download/nda` | NDA PDF. |
+| `GET` | `/legal/download/commercial-schedule` | Commercial schedule PDF. |
+| `GET` | `/legal/download/acceptance-criteria` | Acceptance criteria PDF. |
+| `GET` | `/legal/download/support-scope` | Support scope PDF. |
+| `GET` | `/legal/term-sheet` | Term sheet PDF. |
+| `GET` | `/legal/commercial-schedule` | Commercial schedule PDF. |
 
-### Reports
+### Intelligence, demand, efficiency, query
 
-| Method | Endpoint | Auth | Description |
-|---|---|---|---|
-| `GET` | `/reports/board-pack` | `admin` | PDF board pack (reviewed case summary) |
-| `GET` | `/reports/summary` | `ops_analyst` | Operational summary (reviewed cases) |
+| Method | Endpoint | Description |
+|---|---|---|
+| `GET` | `/intelligence/top-risk` | Top-risk driver list. |
+| `GET` | `/intelligence/driver/{driver_id}` | Driver intelligence detail. |
+| `GET` | `/demand/forecast/{zone_id}` | Demand forecast by zone. |
+| `GET` | `/efficiency/summary` | Fleet efficiency summary. |
+| `GET` | `/efficiency/reallocation` | Reallocation suggestions. |
+| `GET` | `/efficiency/dead-miles` | Dead-mile analysis. |
+| `GET` | `/efficiency/fleet-zones` | Fleet-zone view. |
+| `GET` | `/efficiency/utilisation/{zone_id}` | Zone utilisation. |
+| `POST` | `/query` | Natural-language operations query. |
 
-### KPI
+### Ingestion, demo, shadow
 
-| Method | Endpoint | Auth | Description |
-|---|---|---|---|
-| `GET` | `/kpi/summary` | `ops_analyst` | Live KPI summary from reviewed cases |
-| `GET` | `/kpi/trend` | `ops_analyst` | 30-day trend data |
-
-### ROI
-
-| Method | Endpoint | Auth | Description |
-|---|---|---|---|
-| `POST` | `/roi/calculate` | `read_only` | ROI and payback projection |
-
-### Route Efficiency
-
-| Method | Endpoint | Auth | Description |
-|---|---|---|---|
-| `GET` | `/route/efficiency` | `city_ops` | Fleet efficiency summary |
-| `GET` | `/route/reallocation` | `city_ops` | Driver reallocation recommendations |
-
-### Natural Language Query
-
-| Method | Endpoint | Auth | Description |
-|---|---|---|---|
-| `POST` | `/query` | `ops_analyst` | Ask a natural-language question about operations |
-
-### Ingestion
-
-| Method | Endpoint | Auth | Description |
-|---|---|---|---|
-| `POST` | `/ingest/webhook` | `admin` | Single trip event (live webhook) |
-| `POST` | `/ingest/batch` | `admin` | Batch CSV upload (up to 10,000 trips) |
-| `GET` | `/ingest/queue-status` | `admin` | Redis Stream queue depth and lag |
-
-### Shadow Mode
-
-| Method | Endpoint | Auth | Description |
-|---|---|---|---|
-| `POST` | `/shadow/activate` | `admin` | Activate shadow mode |
-| `POST` | `/shadow/deactivate` | `admin` | Deactivate shadow mode |
-| `GET` | `/shadow/status` | `admin` | Current shadow mode state |
-
-### Demo Controls
-
-| Method | Endpoint | Auth | Description |
-|---|---|---|---|
-| `POST` | `/demo/preset/{name}` | `admin` | Load a named demo preset |
-| `POST` | `/demo/reset` | `admin` | Reset all demo state |
-
-### Legal
-
-| Method | Endpoint | Auth | Description |
-|---|---|---|---|
-| `GET` | `/legal/download` | `admin` | ZIP of full buyer close packet (4 PDFs) |
-| `GET` | `/legal/download/nda` | `admin` | NDA PDF |
-| `GET` | `/legal/download/commercial-schedule` | `admin` | Commercial schedule PDF |
-| `GET` | `/legal/download/acceptance-criteria` | `admin` | Acceptance criteria PDF |
-| `GET` | `/legal/download/support-scope` | `admin` | Deployment and support scope PDF |
+| Method | Endpoint | Description |
+|---|---|---|
+| `POST` | `/ingest/trip-completed` | Single trip ingest. |
+| `POST` | `/ingest/batch-csv` | Batch CSV ingest. |
+| `GET` | `/ingest/status` | Ingestion status. |
+| `GET` | `/ingest/schema-map/default` | Default schema map. |
+| `GET` | `/demo/scenarios` | Demo scenarios. |
+| `GET` | `/demo/preset/{name}` | Demo preset. |
+| `POST` | `/demo/reset` | Reset demo state. |
+| `GET` | `/shadow/status` | Shadow status. |
+| `POST` | `/shadow/activate` | Activate shadow mode. |
+| `POST` | `/shadow/deactivate` | Deactivate shadow mode. |
 
 ---
 
-## 17. Frontend Dashboard
+## 19. Frontend Dashboard
 
-The React dashboard (`dashboard-ui/`) is deployed to Netlify. It communicates with the FastAPI backend through a Netlify proxy (configured in `netlify.toml`) to avoid CORS issues in production.
+The frontend lives in:
 
-### Pages
-
-| Page | Route | Purpose |
-|---|---|---|
-| Dashboard | `/` | KPI overview, live case feed, system status |
-| Analyst | `/analyst` | Case queue, review workflow, bulk actions |
-
-### Components
-
-| Component | File | Purpose |
-|---|---|---|
-| `KPIPanel` | `components/KPIPanel.jsx` | Live metrics — precision, recovery, case volume |
-| `QueryPanel` | `components/QueryPanel.jsx` | Natural-language query interface |
-| `TripScorer` | `components/TripScorer.jsx` | Manual trip scoring form |
-| `ROICalculator` | `components/ROICalculator.jsx` | Interactive ROI projection tool |
-
-### API communication
-
-All API calls use native `fetch()` — no Axios. Requests are routed through the Netlify proxy to the backend API URL configured in `VITE_API_BASE_URL`.
-
-### Local development
-
-```bash
-cd dashboard-ui
-npm install
-npm run dev   # starts on http://localhost:5173
+```text
+dashboard-ui/
 ```
 
-The Vite dev server proxies `/api/*` to `http://localhost:8000`.
+It is a React 19 + Vite app with routes:
+
+| Frontend route | Component | Purpose |
+|---|---|---|
+| `/` | `dashboard-ui/src/pages/Dashboard.jsx` | Executive/live dashboard. |
+| `/login` | `dashboard-ui/src/pages/Login.jsx` | Login form. |
+| `/analyst` | `dashboard-ui/src/pages/Analyst.jsx` | Protected analyst workspace. |
+
+### Key frontend files
+
+| File | Purpose |
+|---|---|
+| `dashboard-ui/src/App.jsx` | React router wiring. |
+| `dashboard-ui/src/main.jsx` | React entrypoint. |
+| `dashboard-ui/src/utils/api.js` | API client, token handling, viewer auto-login support. |
+| `dashboard-ui/src/utils/auth.js` | Auth utility helpers. |
+| `dashboard-ui/src/components/ProtectedRoute.jsx` | Analyst route protection. |
+| `dashboard-ui/src/components/FraudFeed.jsx` | Fraud live feed. |
+| `dashboard-ui/src/components/TripScorer.jsx` | Manual trip scoring form. |
+| `dashboard-ui/src/components/KPIPanel.jsx` | Live KPI cards. |
+| `dashboard-ui/src/components/DriverIntelligence.jsx` | Top-risk drivers. |
+| `dashboard-ui/src/components/ReallocationPanel.jsx` | Route-efficiency suggestions. |
+| `dashboard-ui/src/components/QueryPanel.jsx` | Natural-language query. |
+| `dashboard-ui/src/components/ROICalculator.jsx` | ROI calculator. |
+| `dashboard-ui/src/components/ZoneMap.jsx` | Zone/map visualization. |
+
+### API client behavior
+
+`dashboard-ui/src/utils/api.js`:
+
+- Uses `VITE_API_BASE_URL` or falls back to `/api`.
+- Adds `Authorization: Bearer <token>` when a token exists.
+- Uses `VITE_VIEWER_PASSWORD` only if configured in the hosting environment.
+- Does not redirect to login for ordinary network outages.
+- Redirects named sessions to `/login?reason=session_expired` when token expiry is detected.
+
+Do **not** commit `VITE_VIEWER_PASSWORD`.
 
 ---
 
-## 18. Deployment
+## 20. Deployment And Runtime Configuration
 
-### Environment variables
+### Required backend environment
 
-| Variable | Required | Description |
-|---|---|---|
-| `SECRET_KEY` | Yes | JWT signing secret (≥32 chars) |
-| `ENCRYPTION_KEY` | Yes | AES-256-GCM PII encryption key |
-| `DATABASE_URL` | Yes | PostgreSQL connection string |
-| `REDIS_URL` | Yes | Redis connection string |
-| `PORTER_DISPATCH_URL` | No | Enforcement webhook URL |
-| `ALLOWED_ORIGINS` | No | Comma-separated CORS origins |
-| `RUNTIME_MODE` | No | `demo` / `shadow` / `prod` (default: `prod`) |
+The template is `.env.example`.
 
-Copy `.env.example` to `.env` and fill in values.
+```bash
+DATABASE_URL=postgresql+asyncpg://porter:porter@localhost:5432/porter_intelligence
+REDIS_URL=redis://localhost:6379
+JWT_SECRET_KEY=replace-with-secure-random-64-char-string
+ENCRYPTION_KEY=replace-with-base64-encoded-32-byte-key
+WEBHOOK_SECRET=replace-with-secure-random-64-char-string
+API_ALLOWED_ORIGINS=http://localhost:3000,http://localhost:8000
+APP_ENV=production
+APP_RUNTIME_MODE=prod
+ENABLE_SYNTHETIC_FEED=false
+SHADOW_MODE=false
+ALLOW_PLAINTEXT_PII=false
+ALLOW_UNSIGNED_WEBHOOKS=false
+AUTH_TOKEN_RATE_LIMIT=10/minute
+FRAUD_SCORE_RATE_LIMIT=100/minute
+INGEST_RATE_LIMIT=300/minute
+PORTER_AUTH_ADMIN_PASSWORD=replace-with-strong-password
+PORTER_AUTH_OPS_MANAGER_PASSWORD=replace-with-strong-password
+PORTER_AUTH_ANALYST_PASSWORD=replace-with-strong-password
+PORTER_AUTH_VIEWER_PASSWORD=replace-with-strong-password
+GRAFANA_ADMIN_PASSWORD=replace-with-strong-password
+PORTER_TWIN_TRIPS_PER_MIN=30
+PORTER_TWIN_SCALE_MULTIPLIER=1.0
+PORTER_TWIN_DAILY_GROWTH_PCT=0.0
+PORTER_TWIN_ELAPSED_DAYS=0
+PORTER_TWIN_ACTIVE_CITIES=
+LOG_LEVEL=info
+```
 
-### Docker Compose (local / staging)
+### Runtime modes
+
+`runtime_config.py` understands:
+
+| Env value | Behavior |
+|---|---|
+| `APP_RUNTIME_MODE=prod` | Production semantics. Synthetic feed forced off. |
+| `APP_RUNTIME_MODE=demo` | Demo semantics. Synthetic feed defaults on. |
+| `APP_ENV=production` | Fallback mode source if `APP_RUNTIME_MODE` is absent. |
+| `APP_ENV=demo` | Fallback demo mode if `APP_RUNTIME_MODE` is absent. |
+
+### Docker Compose
+
+```bash
+cp .env.example .env
+# Replace every placeholder before starting production-like compose.
+docker compose up --build
+```
+
+Compose starts:
+
+| Service | Port | Purpose |
+|---|---:|---|
+| `postgres` | 5432 | PostgreSQL case store. |
+| `redis` | 6379 | Redis stream/cache. |
+| `api` | 8000 | FastAPI. |
+| `prometheus` | 9090 | Metrics. |
+| `grafana` | 3001 | Dashboards. |
+
+### Netlify
+
+Root file:
+
+```text
+netlify.toml
+```
+
+Netlify frontend settings:
+
+| Setting | Value |
+|---|---|
+| Base | `dashboard-ui` |
+| Publish | `dist` |
+| Build command | `npm run build` |
+| Edge function path | `dashboard-ui/netlify/edge-functions` |
+
+If using the Netlify edge proxy, set:
+
+```text
+PORTER_API_UPSTREAM=https://your-api-host
+VITE_API_BASE_URL=/api
+```
+
+### Vercel
+
+Files:
+
+```text
+vercel.json
+dashboard-ui/vercel.json
+```
+
+No hardcoded backend tunnel is committed. Use `VITE_API_BASE_URL` or platform-level rewrites configured outside source control.
+
+### AWS
+
+AWS scripts live in:
+
+```text
+infrastructure/aws/
+```
+
+Important files:
+
+| File | Purpose |
+|---|---|
+| `infrastructure/aws/setup.sh` | One-time AWS provisioning. |
+| `infrastructure/aws/deploy.sh` | Build/push/deploy flow. |
+| `infrastructure/aws/pause.sh` | Pause cost-heavy infrastructure. |
+| `infrastructure/aws/teardown.sh` | Tear down provisioned infrastructure. |
+| `infrastructure/aws/ecs-task-definition.json` | ECS task definition template. |
+| `infrastructure/aws/README.md` | AWS runbook. |
+
+---
+
+## 21. Testing And Quality Gates
+
+### Current commands
+
+```bash
+./venv/bin/pytest -q
+./venv/bin/flake8 .
+./venv/bin/bandit -q -r . -c .bandit
+
+cd dashboard-ui
+npm run lint
+npm run build
+```
+
+### Backend test files
+
+| File | Coverage |
+|---|---|
+| `tests/test_api_contract.py` | Live API route contract and router registry guardrail. |
+| `tests/test_auth.py` | Password hashing, seed users, token behavior. |
+| `tests/test_case_workflow_api.py` | Case workflow API. |
+| `tests/test_cases.py` | Case store and case route behavior. |
+| `tests/test_demo_api.py` | Demo reset/scenario behavior. |
+| `tests/test_enforcement.py` | Dispatch webhook behavior. |
+| `tests/test_health_contract.py` | `/health` response contract. |
+| `tests/test_ingestion_api.py` | Ingestion endpoints. |
+| `tests/test_ingestion_queue.py` | Queue/stream behavior. |
+| `tests/test_legal_download.py` | Legal download ZIP/PDF behavior. |
+| `tests/test_live_kpi_metrics.py` | KPI metrics. |
+| `tests/test_live_simulator.py` | Simulator config and event behavior. |
+| `tests/test_model.py` | Model/scoring behavior. |
+| `tests/test_reports_board_pack.py` | Board pack generation. |
+| `tests/test_roi_api.py` | ROI calculation behavior. |
+| `tests/test_schema_mapper.py` | Schema mapping. |
+| `tests/test_security.py` | Security validation. |
+| `tests/test_shadow_api.py` | Shadow API. |
+| `tests/test_shadow_mode.py` | Shadow-mode behavior. |
+
+### Why `test_api_contract.py` matters
+
+This project previously had unused compatibility modules under `api/routes/` that looked active but were not registered. `tests/test_api_contract.py` prevents that class of architecture drift by comparing the live FastAPI route table to an explicit expected set.
+
+---
+
+## 22. Project Structure
+
+```text
+Porter/
+├── api/
+│   ├── main.py                     # FastAPI app, middleware, core endpoints
+│   ├── router_registry.py          # Single live router registration surface
+│   ├── state.py                    # Startup lifespan: model/data/db/redis/cache/scheduler
+│   ├── inference.py                # Fraud, KPI, demand, heatmap, live-feed endpoints
+│   ├── schemas.py                  # Pydantic request/response contracts
+│   ├── limiting.py                 # slowapi limiter
+│   └── routes/
+│       ├── auth.py                 # /auth/token, /auth/me, admin user surface
+│       ├── cases.py                # Case queue, summaries, review, history
+│       ├── demo.py                 # Demo scenarios, presets, reset
+│       ├── driver_intelligence.py  # Top-risk and driver profile surfaces
+│       ├── legal.py                # Legal PDF/download endpoints
+│       ├── live_kpi.py             # Database-backed live KPI endpoint
+│       ├── query.py                # Natural-language query endpoint
+│       ├── reports.py              # Daily summary, model performance, board pack
+│       ├── roi.py                  # ROI calculator and summary
+│       ├── route_efficiency.py     # Fleet efficiency, dead miles, utilisation
+│       └── shadow.py               # Shadow-mode status and toggles
+├── auth/
+│   ├── config.py                   # Env-backed seed users
+│   ├── dependencies.py             # Current-user and permission dependencies
+│   ├── jwt.py                      # Password hashing and JWT helpers
+│   └── models.py                   # Roles and permissions
+├── config/
+│   └── commercial.py               # Commercial terms loaded from env
+├── database/
+│   ├── connection.py               # Async SQLAlchemy engine/session
+│   ├── models.py                   # ORM models
+│   ├── case_store.py               # Case persistence/query helpers
+│   └── redis_client.py             # Redis helpers
+├── dashboard-ui/
+│   ├── src/
+│   │   ├── pages/                  # Dashboard, Analyst, Login
+│   │   ├── components/             # KPI, fraud feed, scorer, ROI, map, etc.
+│   │   ├── hooks/                  # useAuth, useCountUp
+│   │   ├── utils/                  # api.js, auth.js
+│   │   └── assets/                 # images and SVGs
+│   ├── netlify/edge-functions/     # Netlify API proxy
+│   ├── public/                     # favicon, icons, redirects
+│   ├── package.json
+│   ├── vite.config.js
+│   └── vercel.json
+├── data/
+│   ├── raw/                        # Current sample/generated CSV and reports
+│   ├── samples/                    # Portable tiny samples
+│   ├── masked/                     # Masked export placeholder
+│   └── blind_test/                 # Local ignored blind-test exports
+├── docs/
+│   ├── architecture-map.md
+│   ├── architecture-map.mmd
+│   ├── architecture.md
+│   ├── benchmarks/
+│   ├── demo/
+│   ├── deployment/
+│   ├── handover/
+│   └── runbooks/
+├── enforcement/
+│   └── dispatch.py                 # Downstream dispatch webhook integration
+├── generator/
+│   ├── config.py                   # Generator constants and API metadata
+│   ├── cities.py
+│   ├── customers.py
+│   ├── drivers.py
+│   ├── trips.py
+│   ├── fraud.py
+│   └── hard_negatives.py
+├── ingestion/
+│   ├── webhook.py                  # Ingest API
+│   ├── schema_mapper.py            # Field normalization
+│   ├── schema_map.default.json
+│   ├── streams.py                  # Redis stream consumer
+│   ├── staging.py
+│   ├── live_simulator.py
+│   └── city_profiles.py
+├── infrastructure/
+│   ├── prometheus.yml
+│   ├── prometheus-alerts.yml
+│   ├── aws/
+│   └── grafana/provisioning/
+├── ml/
+│   ├── stateless_scorer.py
+│   └── feature_store.py
+├── model/
+│   ├── features.py
+│   ├── train.py
+│   ├── evaluate.py
+│   ├── scoring.py
+│   ├── demand.py
+│   ├── driver_intelligence.py
+│   ├── kpi.py
+│   ├── query.py
+│   ├── route_efficiency.py
+│   └── weights/
+├── monitoring/
+│   ├── metrics.py
+│   └── drift.py
+├── scripts/
+│   ├── local_up.sh
+│   ├── demo_start.sh
+│   ├── seed_demo_db.py
+│   ├── fallback_check.sh
+│   └── build_handover_package.sh
+├── security/
+│   ├── settings.py
+│   └── encryption.py
+├── tests/
+│   └── test_*.py
+├── _archive/
+│   └── unused_modules/api_route_shims/ # Archived unregistered route shims
+├── runtime_config.py
+├── logging_config.py
+├── requirements.txt
+├── Dockerfile
+├── docker-compose.yml
+├── docker-compose.demo.yml
+├── netlify.toml
+├── vercel.json
+├── railway.json
+├── railway.toml
+└── .env.example
+```
+
+---
+
+## 23. What Is Active vs Archived
+
+### Active production/runtime code
+
+Active code is imported by the app, included in router registration, used by tests, used by startup, used by the frontend, or part of deploy/runtime configuration.
+
+Important active roots:
+
+```text
+api/
+auth/
+config/
+dashboard-ui/
+database/
+data/
+enforcement/
+generator/
+ingestion/
+infrastructure/
+ml/
+model/
+monitoring/
+scripts/
+security/
+tests/
+runtime_config.py
+logging_config.py
+```
+
+### Archived or non-runtime material
+
+`_archive/` contains historical materials and modules not part of the live app. The repo `.gitignore` marks `_archive/` as local-only/internal by default.
+
+Currently relevant archive item:
+
+```text
+_archive/unused_modules/api_route_shims/
+```
+
+These files used to live in `api/routes/`:
+
+```text
+api/routes/fraud.py
+api/routes/kpi.py
+api/routes/demand.py
+```
+
+They were import-only compatibility shims, not registered live routers. They were archived to reduce confusion and prevent colleagues from editing files that appear important but do not affect deployed behavior.
+
+### Generated/cache/local-only folders
+
+These should not be treated as source architecture:
+
+```text
+venv/
+dashboard-ui/node_modules/
+dashboard-ui/dist/
+dashboard-ui/.netlify/
+dashboard-ui/.vercel/
+.vercel/
+.pytest_cache/
+__pycache__/
+logs/
+infrastructure/aws/state/
+```
+
+---
+
+## 24. Quickstart
+
+### Prerequisites
+
+- Python 3.11 recommended.
+- Node.js 20 recommended for frontend.
+- Docker and Docker Compose for local PostgreSQL/Redis/Prometheus/Grafana.
+- PostgreSQL and Redis if running without Compose.
+
+### 1. Install Python dependencies
+
+```bash
+python3 -m venv venv
+./venv/bin/pip install --upgrade pip
+./venv/bin/pip install -r requirements.txt
+```
+
+### 2. Configure environment
+
+```bash
+cp .env.example .env
+```
+
+Replace every `replace-with-*` placeholder. Production mode will reject placeholder secrets.
+
+For local development, a minimal useful set is:
+
+```bash
+DATABASE_URL=postgresql+asyncpg://porter:porter@localhost:5432/porter_intelligence
+REDIS_URL=redis://localhost:6379
+APP_RUNTIME_MODE=demo
+ENABLE_SYNTHETIC_FEED=false
+SHADOW_MODE=false
+JWT_SECRET_KEY=<strong-random-secret>
+ENCRYPTION_KEY=<base64-32-byte-key>
+WEBHOOK_SECRET=<strong-random-secret>
+API_ALLOWED_ORIGINS=http://localhost:5173,http://localhost:8000
+PORTER_AUTH_ADMIN_PASSWORD=<password>
+PORTER_AUTH_OPS_MANAGER_PASSWORD=<password>
+PORTER_AUTH_ANALYST_PASSWORD=<password>
+PORTER_AUTH_VIEWER_PASSWORD=<password>
+```
+
+### 3. Start infrastructure
+
+Full stack:
 
 ```bash
 docker compose up --build
 ```
 
-Services started:
-- `api` — FastAPI on port 8000
-- `db` — PostgreSQL on port 5432
-- `redis` — Redis on port 6379
-- `worker` — Redis Stream scoring worker
-
-### AWS ECS Fargate (production)
+Only database and Redis:
 
 ```bash
-cd infrastructure/aws
-./setup.sh      # one-time: ECR repo, ECS cluster, RDS, ElastiCache
-./deploy.sh     # build image, push to ECR, update ECS service
+docker compose up postgres redis -d
 ```
 
-The ECS task definition is in `infrastructure/aws/ecs-task-definition.json`. The API container runs on 2 vCPU / 4GB RAM. Auto-scaling is configured for 1–10 tasks based on CPU utilisation.
-
-### Database initialisation
+### 4. Start API locally
 
 ```bash
-# Apply schema
-alembic upgrade head
-
-# Or use the direct DDL
-psql $DATABASE_URL < database/schema.sql
+./venv/bin/uvicorn api.main:app --reload --host 0.0.0.0 --port 8000
 ```
 
-### Health check
+Useful URLs:
+
+```text
+http://localhost:8000/
+http://localhost:8000/health
+http://localhost:8000/docs
+http://localhost:8000/metrics
+```
+
+### 5. Get an auth token
+
+The current login endpoint is `/auth/token`, not `/auth/login`.
 
 ```bash
-curl https://your-api-domain.com/health
+TOKEN=$(
+  curl -s -X POST http://localhost:8000/auth/token \
+    -H "Content-Type: application/x-www-form-urlencoded" \
+    -d "username=admin&password=$PORTER_AUTH_ADMIN_PASSWORD" \
+  | python3 -c "import sys,json; print(json.load(sys.stdin)['access_token'])"
+)
 ```
 
-Expected response:
-```json
-{
-  "status": "ok",
-  "model_loaded": true,
-  "database": "ok",
-  "redis": "ok",
-  "shadow_mode": false,
-  "version": "1.0.0"
-}
-```
-
----
-
-## 19. Testing
-
-**63 tests across 18 test files.** All tests pass on a clean checkout with the test database and Redis running.
+### 6. Score one trip
 
 ```bash
-pytest tests/ -v
-```
-
-### Test files
-
-| File | Tests | Coverage |
-|---|---|---|
-| `test_auth.py` | Auth endpoints, JWT issuance, RBAC enforcement |
-| `test_case_workflow_api.py` | Full case lifecycle (pending → confirmed/cleared) |
-| `test_demo_api.py` | Demo preset and reset endpoints |
-| `test_enforcement.py` | Dispatch webhook integration |
-| `test_health_contract.py` | `/health` response schema contract |
-| `test_ingestion_api.py` | Webhook, batch CSV, sample file upload |
-| `test_ingestion_queue.py` | Redis Stream XADD/XREAD/XACK cycle |
-| `test_legal_download.py` | `/legal/download` ZIP + individual PDFs |
-| `test_live_kpi_metrics.py` | KPI calculation from reviewed cases |
-| `test_live_simulator.py` | Simulator trip generation and stream write |
-| `test_reports_board_pack.py` | PDF board pack generation |
-| `test_roi_api.py` | ROI calculation with various fleet sizes |
-| `test_schema_mapper.py` | City-specific field name normalisation |
-| `test_security.py` | Encryption, RBAC boundaries, token validation |
-| `test_shadow_api.py` | Shadow mode activation/deactivation API |
-| `test_shadow_mode.py` | Shadow case routing, enforcement suppression |
-
-### Test configuration
-
-Tests use the fixtures defined in `tests/conftest.py`:
-- `security_env` — sets `SECRET_KEY` and `ENCRYPTION_KEY` env vars for tests requiring auth
-- Database tests use a separate test database (configured via `DATABASE_URL` env var)
-
----
-
-## 20. Project Structure
-
-```
-Porter/
-├── api/
-│   ├── main.py                    # FastAPI app, middleware, router registration
-│   ├── inference.py               # Core scoring, batch evaluation endpoints
-│   ├── schemas.py                 # Pydantic request/response models
-│   ├── state.py                   # App startup state, lifespan handler
-│   ├── limiting.py                # Rate limiter configuration (slowapi)
-│   └── routes/
-│       ├── auth.py                # Login, token, /me
-│       ├── cases.py               # Case management and review workflow
-│       ├── demo.py                # Demo control endpoints
-│       ├── driver_intelligence.py # Driver risk profiles, ring detection
-│       ├── legal.py               # Close packet PDF download endpoints
-│       ├── live_kpi.py            # Live KPI from reviewed cases
-│       ├── query.py               # Natural-language query endpoint
-│       ├── reports.py             # Board pack PDF generation
-│       ├── roi.py                 # ROI and payback calculations
-│       ├── route_efficiency.py    # Fleet efficiency and reallocation
-│       └── shadow.py              # Shadow mode control endpoints
-├── auth/
-│   ├── config.py                  # Auth configuration constants
-│   ├── dependencies.py            # get_current_user, require_permission
-│   └── jwt.py                     # Token issuance and validation
-├── database/
-│   ├── connection.py              # AsyncSessionLocal, engine setup
-│   ├── models.py                  # SQLAlchemy ORM models
-│   ├── redis_client.py            # Redis connection and ping
-│   └── case_store.py              # Case read/write helpers
-├── enforcement/
-│   └── dispatch.py                # Enforcement webhook client
-├── generator/
-│   └── config.py                  # Synthetic data config, API metadata
-├── ingestion/
-│   ├── webhook.py                 # Ingest router (webhook, batch)
-│   ├── streams.py                 # Redis Stream producer/consumer
-│   ├── live_simulator.py          # Continuous synthetic trip generator
-│   ├── schema_mapper.py           # Field name normalisation
-│   ├── schema_map.default.json    # Default field mappings
-│   ├── city_profiles.py           # Per-city trip parameter profiles
-│   └── staging.py                 # Staging table write for incomplete events
-├── ml/
-│   └── stateless_scorer.py        # Stateless score_trip() for stream worker
-├── model/
-│   ├── features.py                # FEATURE_COLUMNS (31 features)
-│   ├── fraud_model.ubj            # Trained XGBoost model
-│   └── query.py                   # Model loading and predict_proba wrapper
-├── security/
-│   ├── encryption.py              # AES-256-GCM encrypt/decrypt
-│   └── settings.py                # CORS origin loader
-├── dashboard-ui/
-│   ├── src/
-│   │   ├── pages/
-│   │   │   ├── Dashboard.jsx      # Main KPI and case overview
-│   │   │   └── Analyst.jsx        # Case review workflow
-│   │   └── components/
-│   │       ├── KPIPanel.jsx       # Live metrics display
-│   │       ├── QueryPanel.jsx     # NL query interface
-│   │       ├── TripScorer.jsx     # Manual scoring form
-│   │       └── ROICalculator.jsx  # ROI projection tool
-│   ├── .env.production            # VITE_API_BASE_URL (no secrets)
-│   └── netlify.toml               # Netlify proxy and build config
-├── tests/
-│   ├── conftest.py                # Test fixtures and env setup
-│   └── test_*.py                  # 63 tests across 16 test files
-├── data/
-│   └── samples/
-│       └── porter_sample_10_trips.csv  # Test fixture (10 sample trips)
-├── docs/
-│   └── handover/
-│       ├── repo-access-and-handover.md
-│       ├── acceptance-criteria.md
-│       └── deployment-and-support-scope.md
-├── infrastructure/
-│   └── aws/
-│       ├── setup.sh               # One-time AWS resource provisioning
-│       ├── deploy.sh              # ECS deploy script
-│       └── ecs-task-definition.json
-├── runtime_config.py              # Data provenance description
-├── requirements.txt               # Python dependencies
-├── docker-compose.yml             # Local dev stack
-├── netlify.toml                   # Netlify deploy and proxy config
-└── .env.example                   # Environment variable template
-```
-
----
-
-## 21. Quickstart
-
-### Prerequisites
-
-- Python 3.11+
-- PostgreSQL 16+
-- Redis 7+
-- Node.js 18+ (for dashboard)
-
-### 1. Clone and set up environment
-
-```bash
-git clone https://github.com/Arnav2580/Porter.git
-cd Porter
-python -m venv venv
-source venv/bin/activate
-pip install -r requirements.txt
-cp .env.example .env
-# Edit .env — set SECRET_KEY, ENCRYPTION_KEY, DATABASE_URL, REDIS_URL
-```
-
-### 2. Start infrastructure
-
-```bash
-docker compose up db redis -d
-```
-
-Or use your own PostgreSQL and Redis instances — update `DATABASE_URL` and `REDIS_URL` in `.env`.
-
-### 3. Start the API
-
-```bash
-uvicorn api.main:app --reload --port 8000
-```
-
-API docs: [http://localhost:8000/docs](http://localhost:8000/docs)
-Health check: [http://localhost:8000/health](http://localhost:8000/health)
-
-### 4. Get a token
-
-```bash
-curl -X POST http://localhost:8000/auth/login \
-  -H "Content-Type: application/json" \
-  -d '{"username": "admin", "password": "your_password"}'
-```
-
-### 5. Score a trip
-
-```bash
-curl -X POST http://localhost:8000/fraud/score \
-  -H "Authorization: Bearer <token>" \
+curl -s -X POST http://localhost:8000/fraud/score \
+  -H "Authorization: Bearer $TOKEN" \
   -H "Content-Type: application/json" \
   -d '{
-    "trip_id": "TRIP_001",
-    "driver_id": "DRV_001",
-    "fare_inr": 850,
-    "declared_distance_km": 12.5,
-    "declared_duration_min": 28,
-    "pickup_lat": 19.076,
-    "pickup_lon": 72.877,
-    "dropoff_lat": 19.113,
-    "dropoff_lon": 72.856,
-    "payment_type": "cash"
-  }'
+    "trip_id": "TRIP_SMOKE_001",
+    "driver_id": "DRV_SMOKE_001",
+    "vehicle_type": "mini_truck",
+    "pickup_zone_id": "blr_koramangala",
+    "dropoff_zone_id": "blr_whitefield",
+    "pickup_lat": 12.9352,
+    "pickup_lon": 77.6245,
+    "dropoff_lat": 12.9698,
+    "dropoff_lon": 77.7500,
+    "declared_distance_km": 8.2,
+    "declared_duration_min": 34,
+    "fare_inr": 420,
+    "payment_mode": "cash",
+    "surge_multiplier": 1.1,
+    "requested_at": "2026-04-28T10:30:00+05:30",
+    "is_night": false,
+    "hour_of_day": 10,
+    "day_of_week": 1,
+    "is_peak_hour": true,
+    "zone_demand_at_time": 1.3,
+    "status": "completed",
+    "customer_complaint_flag": false
+  }' | python3 -m json.tool
 ```
 
-Response:
+Expected response shape:
+
 ```json
 {
-  "trip_id": "TRIP_001",
-  "fraud_probability": 0.0334,
+  "trip_id": "TRIP_SMOKE_001",
+  "fraud_probability": 0.1234,
   "tier": "clear",
+  "tier_label": "CLEAR",
+  "tier_color": "#22C55E",
+  "is_fraud_predicted": false,
+  "fraud_risk_level": "LOW",
+  "action_required": "No action required.",
+  "auto_escalate": false,
   "top_signals": [],
-  "case_id": null
+  "narrative": "...",
+  "confidence": "high",
+  "scored_at": "..."
 }
 ```
 
-### 6. Start the dashboard (optional)
+The exact probability depends on model weights and Redis feature-store defaults.
+
+### 7. Start frontend locally
 
 ```bash
 cd dashboard-ui
 npm install
-npm run dev
+VITE_API_BASE_URL=http://localhost:8000 npm run dev
 ```
 
-Dashboard: [http://localhost:5173](http://localhost:5173)
+Open:
+
+```text
+http://localhost:5173
+```
+
+### 8. Run verification
+
+```bash
+./venv/bin/pytest -q
+./venv/bin/flake8 .
+./venv/bin/bandit -q -r . -c .bandit
+
+cd dashboard-ui
+npm run lint
+npm run build
+```
 
 ---
 
-## Handover Package
+## 25. Production Handoff Notes
 
-For buyers and enterprise operators, a complete handover package is available:
+Before connecting this to a company CD pipeline:
 
-- `docs/handover/repo-access-and-handover.md` — Repository access transfer and onboarding
-- `docs/handover/acceptance-criteria.md` — Go-live acceptance criteria and verification
-- `docs/handover/deployment-and-support-scope.md` — 90-day deployment plan and support terms
+1. Keep `api/router_registry.py` as the live API registration source.
+2. Keep `tests/test_api_contract.py` updated whenever endpoints intentionally change.
+3. Keep `model/features.py`, `model/weights/feature_names.json`, and `ml/stateless_scorer.py` synchronized.
+4. Keep `model/weights/two_stage_config.json` as the threshold source of truth.
+5. Never commit real secrets, tokens, viewer passwords, ngrok URLs, or provider preview URLs as API origins.
+6. Use `APP_RUNTIME_MODE=prod` for production.
+7. Use `SHADOW_MODE=true` for first real-data deployment.
+8. Set `API_ALLOWED_ORIGINS` explicitly for deployed frontend origins.
+9. Set `PORTER_API_UPSTREAM` only in Netlify hosting env if using the Netlify edge proxy.
+10. Use AWS Secrets Manager or equivalent for `JWT_SECRET_KEY`, `ENCRYPTION_KEY`, `WEBHOOK_SECRET`, auth passwords, DB URL, and Redis URL.
+11. Treat synthetic benchmark numbers as benchmark evidence, not production performance claims.
+12. Keep `_archive/` for unused/historical material so live source directories stay clean.
 
-Download the full close packet (NDA, Commercial Schedule, Acceptance Criteria, Support Scope) via `GET /legal/download` (admin token required).
-
----
-
-*Porter Intelligence Platform — built for operators who need answers, not dashboards.*
+The current architecture has been moved toward production-grade maintainability by making router registration explicit, archiving unused route shims, removing stale dashboard-root coupling, cleaning hardcoded deploy secrets/URLs, and locking the live route table with tests.
