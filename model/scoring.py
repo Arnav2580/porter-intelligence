@@ -9,6 +9,7 @@ No retraining required.
 import numpy as np
 import pandas as pd
 import json
+import logging
 from typing import Dict, List, Tuple, Optional
 from dataclasses import dataclass
 from pathlib import Path
@@ -22,6 +23,7 @@ from generator.config import (
 )
 
 console = Console()
+logger = logging.getLogger(__name__)
 
 
 # ── Tier configuration ────────────────────────────────────────
@@ -96,9 +98,11 @@ def get_action_threshold() -> float:
         if config_path.exists():
             with open(config_path) as f:
                 cfg = json.load(f)
-            return float(cfg.get("action_threshold", TIERS["action"].threshold_low))
-    except Exception:
-        pass
+            return float(
+                cfg.get("action_threshold", TIERS["action"].threshold_low)
+            )
+    except (OSError, ValueError, TypeError, json.JSONDecodeError) as exc:
+        logger.warning("Could not load action threshold config: %s", exc)
     return TIERS["action"].threshold_low
 
 
@@ -109,9 +113,14 @@ def get_watchlist_threshold() -> float:
         if config_path.exists():
             with open(config_path) as f:
                 cfg = json.load(f)
-            return float(cfg.get("watchlist_threshold", TIERS["watchlist"].threshold_low))
-    except Exception:
-        pass
+            return float(
+                cfg.get(
+                    "watchlist_threshold",
+                    TIERS["watchlist"].threshold_low,
+                )
+            )
+    except (OSError, ValueError, TypeError, json.JSONDecodeError) as exc:
+        logger.warning("Could not load watchlist threshold config: %s", exc)
     return TIERS["watchlist"].threshold_low
 
 

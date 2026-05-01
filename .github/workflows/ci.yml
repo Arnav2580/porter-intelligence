@@ -35,7 +35,7 @@ jobs:
         run: pytest tests/ -v --tb=short
 
       - name: Security scan
-        run: bandit -r . -c .bandit
+        run: bandit -r . -c bandit.yaml
 
       - name: Generate SBOM (CycloneDX)
         run: |

@@ -23,6 +23,7 @@ from generator.config import (
     PILOT_SUCCESS_CRITERIA, FALSE_POSITIVE_OPS_COST,
     ANNUAL_EXTRAP_FACTOR, CONFIDENCE_HAIRCUT, DATA_RAW,
 )
+
 from model.features import (
     build_feature_matrix, FEATURE_COLUMNS,
     compute_trip_features, compute_driver_features,
@@ -423,8 +424,11 @@ def run_training_pipeline(
         hn_df["is_fraud"].values,
         index=range(len(X_train), len(X_train) + len(hn_df)),
     )
+    # v2: weight column is sample_weight (not fraud_confidence_score)
+    weight_col = "sample_weight" if "sample_weight" in hn_df.columns \
+        else "fraud_confidence_score"
     hn_w = pd.Series(
-        hn_df["fraud_confidence_score"].values,
+        hn_df[weight_col].values,
         index=range(len(X_train), len(X_train) + len(hn_df)),
     )
 

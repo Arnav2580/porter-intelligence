@@ -66,6 +66,8 @@ class PorterTripEvent(BaseModel):
     vehicle_category: str
     completed_at:     str
     zone:             Optional[str] = None
+    pickup_zone_id:   Optional[str] = None
+    dropoff_zone_id:  Optional[str] = None
     city:             Optional[str] = None
 
 
@@ -123,7 +125,7 @@ def _normalise(event: PorterTripEvent) -> dict:
         "vehicle_type":          vehicle_map.get(
             event.vehicle_category.upper(), "mini_truck"
         ),
-        "pickup_zone_id":        event.zone or "unknown",
+        "pickup_zone_id":        event.pickup_zone_id or event.zone or "unknown",
         "completed_at":          event.completed_at,
     }
 

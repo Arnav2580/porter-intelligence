@@ -9,13 +9,12 @@ All startup state lives in api/state.py.
 import logging
 import os
 import time
-from pathlib import Path
 from datetime import datetime
 
 from dotenv import load_dotenv
 from fastapi import Depends, FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, Response
+from fastapi.responses import Response
 from slowapi import _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
 from sqlalchemy import select
@@ -24,6 +23,7 @@ from starlette.middleware.base import BaseHTTPMiddleware
 load_dotenv()
 
 from api.limiting import limiter
+from api.router_registry import register_routers
 from generator.config import API_TITLE, API_VERSION, API_DESCRIPTION
 from api.state import app_state, lifespan
 from database.connection import AsyncSessionLocal
@@ -137,48 +137,22 @@ class PrometheusMiddleware(BaseHTTPMiddleware):
 
 app.add_middleware(SecurityHeadersMiddleware)
 app.add_middleware(PrometheusMiddleware)
-
-# Register routers
-from api.inference import router as inference_router
-from api.routes.auth import router as auth_router
-from api.routes.cases import router as cases_router
-from api.routes.query import router as query_router
-from api.routes.driver_intelligence import router as intelligence_router
-from api.routes.demo import router as demo_router
-from api.routes.reports import router as reports_router
-from api.routes.roi import router as roi_router
-from api.routes.route_efficiency import router as efficiency_router
-from api.routes.shadow import router as shadow_router
-from api.routes.live_kpi import router as live_kpi_router
-from api.routes.legal import router as legal_router
-from ingestion.webhook import router as ingest_router
-
-app.include_router(inference_router)
-app.include_router(auth_router)
-app.include_router(cases_router)
-app.include_router(query_router)
-app.include_router(intelligence_router)
-app.include_router(demo_router)
-app.include_router(reports_router)
-app.include_router(roi_router)
-app.include_router(efficiency_router)
-app.include_router(shadow_router)
-app.include_router(live_kpi_router)
-app.include_router(legal_router)
-app.include_router(ingest_router)
-
-
-# -- Core endpoints --
-
-DASHBOARD_PATH = Path(__file__).parent.parent / "dashboard" / "index.html"
+register_routers(app)
 
 
 @app.get("/")
 async def root():
-    """Serve the management dashboard."""
-    if DASHBOARD_PATH.exists():
-        return FileResponse(DASHBOARD_PATH, media_type="text/html")
-    return {"message": "Porter Intelligence Platform", "docs": "/docs"}
+    """API landing endpoint.
+
+    The production dashboard is the React app in dashboard-ui/. The backend
+    root intentionally returns API metadata instead of serving a legacy static
+    dashboard from the old dashboard/ directory.
+    """
+    return {
+        "message": "Porter Intelligence Platform API",
+        "docs": "/docs",
+        "health": "/health",
+    }
 
 
 from auth.dependencies import require_permission as _require_permission
@@ -271,10 +245,10 @@ async def health():
         "thresholds": {
             "watchlist_threshold": (
                 app_state.get("two_stage_config") or {}
-            ).get("watchlist_threshold", 0.45),
+            ).get("watchlist_threshold", 0.50),
             "action_threshold": (
                 app_state.get("two_stage_config") or {}
-            ).get("action_threshold", 0.94),
+            ).get("action_threshold", 0.80),
         },
         "simulator_summary": app_state.get(
             "simulator_summary"

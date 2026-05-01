@@ -1,0 +1,270 @@
+%% Porter Intelligence - readable visual architecture map
+%% Paste into Mermaid AI / Mermaid Live.
+%% This is intentionally NOT a full file inventory. It is a visual "control-room"
+%% map: big system areas, their most important files, and the runtime flow.
+
+%%{init: {
+  "theme": "base",
+  "themeVariables": {
+    "fontFamily": "Inter, ui-sans-serif, system-ui, sans-serif",
+    "primaryColor": "#f8fafc",
+    "primaryTextColor": "#0f172a",
+    "primaryBorderColor": "#334155",
+    "lineColor": "#475569",
+    "tertiaryColor": "#eef2ff"
+  },
+  "flowchart": {
+    "curve": "basis",
+    "nodeSpacing": 55,
+    "rankSpacing": 85,
+    "padding": 18
+  }
+}}%%
+
+flowchart TB
+  %% =========================
+  %% VISUAL LEGEND
+  %% =========================
+  legend["How to read this map<br/>Top = UI and users<br/>Left = inbound data<br/>Center = API brain<br/>Bottom = ML, DB, infra<br/>Right = business outputs"]
+
+  %% =========================
+  %% TOP: PEOPLE + FRONTEND
+  %% =========================
+  subgraph TOP["Experience Layer"]
+    direction LR
+    user["Operators<br/>Analysts<br/>Admins"]
+    browser["Browser"]
+    ui["dashboard-ui<br/>React + Vite"]
+    pages["Pages<br/>Dashboard.jsx<br/>Analyst.jsx<br/>Login.jsx"]
+    components["Key Components<br/>FraudFeed<br/>TripScorer<br/>KPIPanel<br/>DriverIntelligence<br/>ROICalculator<br/>QueryPanel<br/>ReallocationPanel<br/>ZoneMap"]
+    apiClient["API Client<br/>src/utils/api.js<br/>token handling<br/>viewer auto-login<br/>fetch wrappers"]
+  end
+
+  user --> browser --> ui --> pages --> components --> apiClient
+
+  %% =========================
+  %% LEFT: DATA ENTERS
+  %% =========================
+  subgraph LEFT["Inbound Data Layer"]
+    direction TB
+    liveWebhook["Live trip events<br/>partner webhook"]
+    batchCsv["Batch CSV uploads"]
+    ingestOps["Ingest ops surface<br/>/ingest/status<br/>schema-map/default"]
+    simulator["Demo simulator<br/>ingestion/live_simulator.py"]
+    webhook["Ingestion API<br/>ingestion/webhook.py"]
+    mapper["Schema normalization<br/>ingestion/schema_mapper.py<br/>schema_map.default.json"]
+    stream["Redis stream<br/>porter:trips"]
+    consumer["Stream consumer<br/>ingestion/streams.py"]
+  end
+
+  liveWebhook --> webhook
+  batchCsv --> webhook
+  ingestOps --> webhook
+  simulator --> stream
+  webhook --> mapper --> stream --> consumer
+
+  %% =========================
+  %% CENTER: API BRAIN
+  %% =========================
+  subgraph CENTER["FastAPI Control Plane"]
+    direction TB
+    app["api/main.py<br/>FastAPI app<br/>middleware<br/>/health /metrics"]
+    registry["api/router_registry.py<br/>single live router list"]
+    state["api/state.py<br/>startup lifespan<br/>model loading<br/>data loading<br/>cache warmup<br/>scheduler"]
+    inference["api/inference.py<br/>fraud score<br/>live feed<br/>tier summary<br/>KPI report<br/>demand forecast"]
+    routers["api/routes/*<br/>auth cases demo legal<br/>reports ROI query shadow<br/>live_kpi route_efficiency<br/>driver_intelligence"]
+    schemas["api/schemas.py<br/>request response contracts"]
+    limits["api/limiting.py<br/>rate limits"]
+  end
+
+  apiClient --> app
+  webhook --> app
+  consumer --> inference
+  app --> registry
+  app --> state
+  app --> inference
+  app --> routers
+  app --> schemas
+  app --> limits
+
+  %% =========================
+  %% SECURITY RING
+  %% =========================
+  subgraph SECURITY["Security + Identity Ring"]
+    direction LR
+    auth["auth/<br/>config.py<br/>jwt.py<br/>dependencies.py<br/>models.py"]
+    security["security/<br/>settings.py<br/>encryption.py"]
+    commercial["config/commercial.py<br/>commercial terms from env"]
+    enforcement["enforcement/dispatch.py<br/>dispatch webhook guardrails<br/>/webhooks/dispatch/test"]
+    adminAuth["Auth admin surface<br/>/auth/token<br/>/auth/me<br/>/auth/admin/users"]
+  end
+
+  app --> auth
+  app --> security
+  auth --> adminAuth
+  routers --> commercial
+  routers --> enforcement
+
+  %% =========================
+  %% BOTTOM LEFT: MODEL FACTORY
+  %% =========================
+  subgraph MODEL_FACTORY["Model Factory + Synthetic Twin"]
+    direction TB
+    generator["generator/<br/>config cities customers<br/>drivers trips fraud<br/>hard_negatives"]
+    rawData["data/raw/<br/>trips and drivers CSVs<br/>hard negatives<br/>evaluation_report.json"]
+    dataReservoirs["Other data reservoirs<br/>data/samples<br/>data/masked<br/>data/blind_test"]
+    features["model/features.py<br/>canonical feature engineering"]
+    train["model/train.py<br/>model training"]
+    evaluate["model/evaluate.py<br/>benchmark evaluation"]
+    weights["model/weights/<br/>xgb_fraud_model.json<br/>feature_names.json<br/>two_stage_config.json<br/>demand_models.pkl"]
+  end
+
+  generator --> rawData --> features --> train --> weights
+  rawData --> dataReservoirs
+  evaluate --> rawData
+  evaluate --> weights
+
+  %% =========================
+  %% BOTTOM CENTER: RUNTIME INTELLIGENCE
+  %% =========================
+  subgraph RUNTIME_INTEL["Runtime Intelligence"]
+    direction TB
+    scorer["ml/stateless_scorer.py<br/>single-trip feature vector<br/>XGBoost probability<br/>tier selection"]
+    featureStore["ml/feature_store.py<br/>driver features<br/>zone features<br/>Redis-backed"]
+    scoring["model/scoring.py<br/>action >= 0.80<br/>watchlist >= 0.50<br/>clear < 0.50"]
+    analyticsModels["model analytics<br/>demand.py<br/>driver_intelligence.py<br/>route_efficiency.py<br/>query.py<br/>kpi.py"]
+    demandRuntime["Demand forecast runtime<br/>demand_models.pkl<br/>/demand/forecast/{zone_id}"]
+  end
+
+  inference --> scorer
+  consumer --> scorer
+  weights --> scorer
+  scorer --> featureStore
+  scorer --> scoring
+  routers --> analyticsModels
+  analyticsModels --> demandRuntime
+
+  %% =========================
+  %% BOTTOM RIGHT: STORAGE
+  %% =========================
+  subgraph STORAGE["Storage + State"]
+    direction TB
+    postgres[("PostgreSQL<br/>cases<br/>audit history<br/>workflow state")]
+    redis[("Redis<br/>streams<br/>feature cache<br/>rate limit state")]
+    dbCode["database/<br/>connection.py<br/>models.py<br/>case_store.py<br/>redis_client.py"]
+  end
+
+  state --> postgres
+  state --> redis
+  stream --> redis
+  featureStore --> redis
+  routers --> dbCode
+  inference --> dbCode
+  dbCode --> postgres
+  dbCode --> redis
+
+  %% =========================
+  %% RIGHT: BUSINESS SURFACES
+  %% =========================
+  subgraph RIGHT["Business Output Layer"]
+    direction TB
+    caseQueue["Case queue<br/>/cases<br/>batch review<br/>history<br/>driver actions"]
+    fraudOps["Fraud operations<br/>/fraud/score<br/>/fraud/live-feed<br/>/fraud/tier-summary"]
+    kpiBoard["Live KPI + reports<br/>/kpi/live<br/>/kpi/summary<br/>/kpi/report<br/>/reports/board-pack<br/>daily-summary model-performance"]
+    intelligence["Driver intelligence<br/>/intelligence/top-risk<br/>/intelligence/driver/{id}<br/>/fraud/driver/{id}"]
+    routeOps["Route efficiency<br/>/efficiency/summary<br/>dead-miles fleet-zones<br/>reallocation utilisation"]
+    demandOps["Demand forecasting<br/>/demand/forecast/{zone_id}"]
+    queryOps["Natural language ops query<br/>POST /query"]
+    commercialOps["Commercial surfaces<br/>/roi/calculate<br/>/roi/summary<br/>legal downloads<br/>NDA support scope<br/>term sheet schedule"]
+    demoOps["Demo controls<br/>/demo/scenarios<br/>/demo/preset/{name}<br/>/demo/reset"]
+    shadowMode["Shadow mode<br/>/shadow/status<br/>safe validation<br/>no writeback"]
+    dispatchOut["External dispatch<br/>PORTER_DISPATCH_URL"]
+  end
+
+  routers --> caseQueue
+  inference --> fraudOps
+  routers --> kpiBoard
+  routers --> intelligence
+  routers --> routeOps
+  inference --> demandOps
+  routers --> queryOps
+  routers --> commercialOps
+  routers --> demoOps
+  routers --> shadowMode
+  enforcement --> dispatchOut
+
+  caseQueue --> analystOut["Analyst decisions"]
+  fraudOps --> dashboardOut["Dashboard visualization"]
+  kpiBoard --> execOut["Board / management reporting"]
+  intelligence --> opsOut["Ops recommendations"]
+  routeOps --> opsOut
+  demandOps --> opsOut
+  queryOps --> opsOut
+  commercialOps --> salesOut["ROI and legal packet"]
+  demoOps --> dashboardOut
+  shadowMode --> pilotOut["Pilot validation"]
+
+  %% =========================
+  %% INFRASTRUCTURE BASE
+  %% =========================
+  subgraph INFRA["Deployment + Observability Base"]
+    direction LR
+    docker["Docker<br/>Dockerfile<br/>docker-compose.yml<br/>docker-compose.demo.yml"]
+    scripts["scripts/<br/>local_up.sh<br/>demo_start.sh<br/>seed_demo_db.py<br/>fallback_check.sh"]
+    cloud["Deploy configs<br/>railway.json/toml<br/>netlify.toml<br/>vercel.json<br/>dashboard-ui/vercel.json"]
+    aws["infrastructure/aws<br/>setup deploy pause teardown<br/>ecs-task-definition.json"]
+    metrics["monitoring/<br/>metrics.py<br/>drift.py"]
+    prom["Prometheus<br/>prometheus.yml<br/>alerts.yml"]
+    grafana["Grafana<br/>porter-dashboard.json"]
+    tests["Quality gates<br/>pytest<br/>flake8<br/>bandit<br/>npm lint<br/>npm build"]
+    docs["Docs<br/>README.md<br/>documentation.md<br/>docs/architecture-map.md<br/>docs/architecture-map.mmd"]
+    archive["_archive/<br/>legacy dashboard<br/>old data prep<br/>internal docs<br/>sales docs<br/>unused api route shims"]
+  end
+
+  docker --> app
+  docker --> postgres
+  docker --> redis
+  scripts --> app
+  cloud --> ui
+  cloud --> app
+  aws --> docker
+  app --> metrics --> prom --> grafana
+  tests --> app
+  tests --> ui
+  docs -.-> app
+  docs -.-> ui
+  archive -.-> docs
+
+  %% =========================
+  %% MAIN RUNTIME PATH HIGHLIGHT
+  %% =========================
+  liveWebhook ==>|1 ingest| webhook
+  mapper ==>|2 normalize| stream
+  consumer ==>|3 score| scorer
+  scorer ==>|4 persist flagged cases| dbCode
+  dbCode ==>|5 review data| routers
+  routers ==>|6 API responses| apiClient
+  apiClient ==>|7 render| pages
+
+  %% =========================
+  %% STYLING
+  %% =========================
+  classDef top fill:#eef2ff,stroke:#4338ca,color:#111827,stroke-width:2px
+  classDef inbound fill:#ecfeff,stroke:#0891b2,color:#083344,stroke-width:2px
+  classDef center fill:#dcfce7,stroke:#15803d,color:#052e16,stroke-width:3px
+  classDef security fill:#fff7ed,stroke:#ea580c,color:#431407,stroke-width:2px
+  classDef model fill:#fef9c3,stroke:#ca8a04,color:#422006,stroke-width:2px
+  classDef storage fill:#fce7f3,stroke:#be185d,color:#500724,stroke-width:2px
+  classDef output fill:#ede9fe,stroke:#7c3aed,color:#2e1065,stroke-width:2px
+  classDef infra fill:#f1f5f9,stroke:#475569,color:#0f172a,stroke-width:2px
+  classDef note fill:#ffffff,stroke:#94a3b8,color:#334155,stroke-dasharray: 5 5
+
+  class user,browser,ui,pages,components,apiClient top
+  class liveWebhook,batchCsv,ingestOps,simulator,webhook,mapper,stream,consumer inbound
+  class app,registry,state,inference,routers,schemas,limits center
+  class auth,security,commercial,enforcement,adminAuth security
+  class generator,rawData,dataReservoirs,features,train,evaluate,weights,scorer,featureStore,scoring,analyticsModels,demandRuntime model
+  class postgres,redis,dbCode storage
+  class caseQueue,fraudOps,kpiBoard,intelligence,routeOps,demandOps,queryOps,commercialOps,demoOps,shadowMode,dispatchOut,analystOut,dashboardOut,execOut,opsOut,salesOut,pilotOut output
+  class docker,scripts,cloud,aws,metrics,prom,grafana,tests,docs,archive infra
+  class legend note

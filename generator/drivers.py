@@ -1,7 +1,19 @@
 """
-Porter Intelligence Platform — Driver Profile Generator
-Generates 50,000 synthetic Porter driver profiles.
-Fraud propensity is the core training signal — encode it carefully.
+Porter Intelligence Platform — Driver Profile Generator v2
+
+v2 changes:
+  - REMOVED: fraud_propensity field (was a leaked training label)
+  - REMOVED: fraud_propensity_segments (god-mode cheating for model)
+  - ADDED:   document verification fields (aadhaar, DL, RC, bank KYC)
+  - ADDED:   observable behavioral stats (30-day rolling windows)
+  - ADDED:   device risk signals (shared_device, duplicate_account)
+  - KEPT:    fraud_ring_id / ring_role — these are structural metadata
+             used for RING DETECTION logic, not per-trip fraud label
+  - Ring assignment now based on OBSERVABLE driver behavior stats,
+    not on a hidden propensity score
+
+The fraud injection engine (fraud.py) uses probabilistic selection
+based on observable driver features — not a leaked propensity field.
 """
 
 import uuid
@@ -9,23 +21,20 @@ import numpy as np
 import pandas as pd
 from datetime import datetime, timedelta
 from typing import List, Optional
-from faker import Faker
 from rich.console import Console
 from rich.table import Table
 from rich.progress import Progress, SpinnerColumn, BarColumn, TextColumn
 
 from generator.config import (
     RANDOM_SEED, NUM_DRIVERS, CITIES, VEHICLE_TYPES,
-    VEHICLE_DISTRIBUTION, FRAUD_PROPENSITY_SEGMENTS,
-    FRAUD_PROPENSITY_ADJUSTMENTS, DATA_RAW,
+    VEHICLE_DISTRIBUTION, DATA_RAW,
+    CITY_CASH_PCT,
 )
 from generator.cities import ZONES, CITY_ZONES
 
 console = Console()
 
-# ── Faker setup ───────────────────────────────────────────────
-fake = Faker("en_IN")
-Faker.seed(RANDOM_SEED)
+fake_seed = RANDOM_SEED
 rng = np.random.default_rng(RANDOM_SEED)
 
 # ── Indian name pool ──────────────────────────────────────────
@@ -34,143 +43,140 @@ INDIAN_FIRST_NAMES: List[str] = [
     "Dinesh", "Naresh", "Prakash", "Lokesh", "Umesh", "Rakesh",
     "Vijay", "Sanjay", "Ajay", "Manoj", "Anil", "Sunil",
     "Mukesh", "Deepak", "Vivek", "Ashok", "Vinod",
-    "Mohan", "Rohan", "Sohan", "Krishan", "Kishan", "Harish",
-    "Girish", "Paresh", "Nilesh", "Ritesh", "Hitesh", "Jitesh",
-    "Satish", "Manish", "Danish", "Rupesh", "Brijesh", "Yogesh",
-    "Santosh", "Ramakrishna", "Venkatesh", "Shivakumar", "Basavaraj",
-    "Mohammed", "Abdul", "Ibrahim", "Salman", "Imran", "Wasim",
-    "Arjun", "Kiran", "Pavan", "Naveen", "Praveen", "Sreeram",
+    "Mohan", "Rohan", "Krishan", "Kishan", "Harish",
+    "Girish", "Paresh", "Nilesh", "Ritesh", "Satish",
+    "Manish", "Santosh", "Venkatesh", "Shivakumar", "Basavaraj",
+    "Mohammed", "Abdul", "Ibrahim", "Salman", "Imran",
+    "Arjun", "Kiran", "Pavan", "Naveen", "Praveen",
     "Thirumalai", "Selvam", "Murugan", "Senthil", "Karthi",
-    "Babu", "Thiru", "Raja", "Rajan", "Mani", "Kumar",
+    "Babu", "Raja", "Rajan", "Mani", "Kumar",
 ]
 
 INDIAN_LAST_NAMES: List[str] = [
     "Kumar", "Singh", "Sharma", "Yadav", "Gupta", "Mishra",
     "Patel", "Shah", "Mehta", "Desai", "Joshi", "Nair",
     "Pillai", "Menon", "Reddy", "Naidu", "Rao", "Iyer",
-    "Iyengar", "Bhat", "Shetty", "Gowda", "Hegde", "Patil",
-    "Kulkarni", "Jain", "Agarwal", "Bansal", "Garg", "Mittal",
-    "Khan", "Ansari", "Shaikh", "Siddiqui", "Qureshi",
-    "Mukherjee", "Chatterjee", "Banerjee", "Das", "Ghosh",
-    "Verma", "Tiwari", "Pandey", "Dubey", "Shukla", "Tripathi",
-    "Nayak", "Swamy", "Murthy", "Raju", "Babu", "Prasad",
+    "Bhat", "Shetty", "Gowda", "Hegde", "Patil",
+    "Kulkarni", "Jain", "Agarwal", "Bansal", "Garg",
+    "Khan", "Ansari", "Shaikh", "Siddiqui",
+    "Mukherjee", "Chatterjee", "Das", "Ghosh",
+    "Verma", "Tiwari", "Pandey", "Dubey", "Shukla",
+    "Nayak", "Swamy", "Murthy", "Raju", "Babu",
 ]
 
 
 def generate_indian_phone(rng: np.random.Generator) -> str:
-    """Generate a realistic Indian mobile number in +91XXXXXXXXXX format."""
     first_digit = rng.choice([6, 7, 8, 9])
     remaining = rng.integers(100_000_000, 999_999_999)
     return f"+91{first_digit}{remaining}"
 
 
 def generate_indian_name(rng: np.random.Generator) -> str:
-    """Generate a realistic Indian driver name from the curated pool."""
     first = rng.choice(INDIAN_FIRST_NAMES)
-    last = rng.choice(INDIAN_LAST_NAMES)
+    last  = rng.choice(INDIAN_LAST_NAMES)
     return f"{first} {last}"
 
 
-def sample_base_fraud_propensity(rng: np.random.Generator) -> float:
-    """
-    Sample a base fraud propensity from the three-segment distribution.
-
-    Segments mirror real gig-economy driver behaviour:
-      91% honest     → beta(1.5, 12)  scaled to [0.00, 0.15]
-      6%  occasional → beta(2.0, 3.0) scaled to [0.15, 0.50]
-      3%  chronic    → beta(2.5, 1.5) scaled to [0.50, 1.00]
-    """
-    draw = rng.random()
-
-    if draw < FRAUD_PROPENSITY_SEGMENTS["honest"]["pct"]:
-        raw = rng.beta(1.5, 12.0)
-        return float(raw * 0.15)
-
-    elif draw < (FRAUD_PROPENSITY_SEGMENTS["honest"]["pct"]
-                 + FRAUD_PROPENSITY_SEGMENTS["occasional"]["pct"]):
-        raw = rng.beta(2.0, 3.0)
-        return float(0.15 + raw * 0.35)
-
-    else:
-        raw = rng.beta(2.5, 1.5)
-        return float(0.50 + raw * 0.50)
-
-
-def compute_fraud_propensity(
-    bank_account_type: str,
-    verification_status: str,
-    account_age_days: int,
-    rating: float,
-    cancellation_rate: float,
-    base_propensity: float,
-) -> float:
-    """
-    Apply risk-factor multipliers to base propensity score.
-
-    Risk factors compound on existing propensity — a low-risk honest driver
-    sees minimal absolute shift; a borderline driver shifts meaningfully.
-    This preserves the 91/6/3 segment shape while encoding real correlations.
-
-    The config adjustment values are used as additive multiplier components
-    (e.g. cash_payment=0.30 → multiply by 1.30), not as raw additive shifts,
-    so that the honest segment's narrow range [0, 0.15] is not blown out.
-
-    CRITICAL: This field is a training label ONLY.
-    It must NEVER appear in any API response or exported CSV
-    intended for external sharing.
-
-    Returns float clamped to [0.0, 1.0].
-    """
-    risk_multiplier = 1.0
-
-    if bank_account_type == "cash":
-        risk_multiplier += FRAUD_PROPENSITY_ADJUSTMENTS["cash_payment"]
-
-    if verification_status == "unverified":
-        risk_multiplier += FRAUD_PROPENSITY_ADJUSTMENTS["unverified_status"]
-
-    if account_age_days < 180:
-        risk_multiplier += FRAUD_PROPENSITY_ADJUSTMENTS["new_driver"]
-
-    if rating < 3.8:
-        risk_multiplier += FRAUD_PROPENSITY_ADJUSTMENTS["low_rating"]
-
-    if cancellation_rate > 0.20:
-        risk_multiplier += FRAUD_PROPENSITY_ADJUSTMENTS["high_cancellation"]
-
-    return float(np.clip(base_propensity * risk_multiplier, 0.0, 1.0))
-
-
-def assign_driver_zone(
-    city: str,
-    fraud_propensity: float,
-    rng: np.random.Generator,
-) -> str:
+def assign_driver_zone(city: str, rng: np.random.Generator) -> str:
     """
     Assign a home zone to a driver.
-
-    Chronic fraudsters (propensity > 0.50) are 3x more likely
-    to operate in high-density commercial zones where trip volume
-    hides fake trips more easily.
+    Distribution is uniform — fraud-zone bias is removed.
+    Real fraud emerges from behavioral patterns, not pre-seeded zones.
     """
     zone_ids = CITY_ZONES.get(city, [])
     if not zone_ids:
         return "unknown"
+    return str(rng.choice(zone_ids))
 
-    if fraud_propensity <= 0.50:
-        return str(rng.choice(zone_ids))
 
-    # Chronic fraudsters — weight toward high fraud_rate_adj zones
-    fraud_adjs = []
-    for zid in zone_ids:
-        zone = ZONES[zid]
-        weight = 1.0 + (zone.fraud_rate_adj * 200)
-        fraud_adjs.append(weight)
+def sample_behavioral_stats(
+    account_age_days: int,
+    vehicle_type: str,
+    city: str,
+    rng: np.random.Generator,
+) -> dict:
+    """
+    Generate realistic 30-day behavioral statistics for a driver.
 
-    total = sum(fraud_adjs)
-    probs = [w / total for w in fraud_adjs]
+    These are the ONLY behavioral signals the fraud model sees.
+    They replace the leaked fraud_propensity field entirely.
 
-    return str(rng.choice(zone_ids, p=probs))
+    Three latent driver archetypes (drawn probabilistically):
+      ~91% honest drivers  → low cancel, low dispute, moderate cash
+      ~6%  opportunistic   → elevated cancel + dispute, higher cash
+      ~3%  chronic risk    → high cancel, high dispute, high cash, low rating
+
+    This is a natural outcome of the behavioral distribution,
+    not a stored propensity label.
+    """
+    city_cash_pct = CITY_CASH_PCT.get(city, 0.25)
+
+    # Draw archetype
+    draw = rng.random()
+    if draw < 0.91:
+        # Honest: low risk across all signals
+        cancel_rate   = float(np.clip(rng.beta(1.2, 10.0) * 0.18, 0.0, 0.18))
+        dispute_rate  = float(np.clip(rng.beta(1.0, 20.0) * 0.05, 0.0, 0.05))
+        cash_ratio    = float(np.clip(
+            rng.normal(city_cash_pct, city_cash_pct * 0.3), 0.0, 0.55
+        ))
+        avg_rating    = float(np.clip(rng.normal(4.3, 0.3), 3.5, 5.0))
+        night_ratio   = float(np.clip(rng.beta(1.5, 8.0) * 0.25, 0.0, 0.25))
+
+    elif draw < 0.97:
+        # Opportunistic: elevated on 1–2 signals
+        cancel_rate   = float(np.clip(rng.beta(2.5, 6.0) * 0.40, 0.05, 0.40))
+        dispute_rate  = float(np.clip(rng.beta(2.0, 8.0) * 0.12, 0.01, 0.12))
+        cash_ratio    = float(np.clip(
+            rng.normal(city_cash_pct + 0.20, 0.10), 0.10, 0.70
+        ))
+        avg_rating    = float(np.clip(rng.normal(3.8, 0.4), 2.5, 4.5))
+        night_ratio   = float(np.clip(rng.beta(2.0, 5.0) * 0.40, 0.05, 0.40))
+
+    else:
+        # Chronic risk: consistently elevated across all signals
+        cancel_rate   = float(np.clip(rng.beta(3.0, 4.0) * 0.55, 0.15, 0.55))
+        dispute_rate  = float(np.clip(rng.beta(3.0, 5.0) * 0.25, 0.05, 0.25))
+        cash_ratio    = float(np.clip(
+            rng.normal(city_cash_pct + 0.35, 0.12), 0.30, 0.92
+        ))
+        avg_rating    = float(np.clip(rng.normal(3.2, 0.5), 1.0, 4.0))
+        night_ratio   = float(np.clip(rng.beta(3.0, 4.0) * 0.60, 0.15, 0.60))
+
+    # Trip counts derived from account age (2–4 trips/day)
+    trips_per_day = float(np.clip(rng.normal(2.8, 0.8), 0.5, 8.0))
+    active_days   = min(account_age_days, 30)
+    trips_30d     = max(1, int(trips_per_day * active_days * 0.85))
+
+    # Average fare by vehicle type
+    veh = VEHICLE_TYPES[vehicle_type]
+    avg_distance_30d = float(np.clip(
+        rng.normal(
+            (veh.typical_trip_km[0] + veh.typical_trip_km[1]) / 2,
+            (veh.typical_trip_km[1] - veh.typical_trip_km[0]) / 4
+        ),
+        veh.typical_trip_km[0], veh.typical_trip_km[1]
+    ))
+    avg_fare_30d = veh.base_fare + veh.per_km_rate * avg_distance_30d
+    avg_fare_30d = float(np.clip(
+        rng.normal(avg_fare_30d, avg_fare_30d * 0.15),
+        veh.base_fare, avg_fare_30d * 2.5
+    ))
+
+    # Completion rate (inverse of cancel rate)
+    completion_rate_30d = float(np.clip(1.0 - cancel_rate - 0.05, 0.40, 0.98))
+
+    return {
+        "trips_last_30d":       trips_30d,
+        "completion_rate_30d":  round(completion_rate_30d, 4),
+        "cancel_rate_30d":      round(cancel_rate, 4),
+        "dispute_rate_30d":     round(dispute_rate, 4),
+        "cash_trip_ratio_30d":  round(cash_ratio, 4),
+        "avg_rating_30d":       round(avg_rating, 2),
+        "night_trip_ratio_30d": round(night_ratio, 4),
+        "avg_fare_30d":         round(avg_fare_30d, 2),
+        "avg_distance_30d":     round(avg_distance_30d, 2),
+    }
 
 
 def assign_fraud_rings(
@@ -178,41 +184,48 @@ def assign_fraud_rings(
     rng: np.random.Generator,
 ) -> pd.DataFrame:
     """
-    Assign fraud ring membership to chronic fraudsters.
+    Assign fraud ring membership based on OBSERVABLE behavioral signals.
 
-    Ring structure mirrors real gig fraud networks:
-    - ~60% of chronic fraudsters belong to a ring
-    - Ring size: 3-6 drivers
-    - Rings are zone-specific (drivers in same zone)
-    - ~40% of chronic fraudsters are solo operators
+    Ring criteria (all must be true):
+      - cancel_rate_30d > 0.20  (active cancellation abuser)
+      - dispute_rate_30d > 0.05 (elevated disputes)
+      - cash_trip_ratio_30d > city_avg + 0.25 (cash preference)
 
-    fraud_ring_id: string like "RING_BLR_001" or None
-    ring_role: "leader" | "member" | "solo" | None
+    ~60% of qualifying drivers are grouped into rings (3-6 per ring).
+    ~40% are solo operators with similar behavior.
+
+    Rings are zone-contained (same city zone) — realistic operational pattern.
     """
+    df = df.copy()
     df["fraud_ring_id"] = None
-    df["ring_role"] = None
+    df["ring_role"]     = None
 
-    chronic_mask = df["fraud_propensity"] > 0.50
-    chronic_drivers = df[chronic_mask].copy()
+    # Identify behavioral risk drivers using ONLY observable signals
+    risk_mask = (
+        (df["cancel_rate_30d"]     > 0.20) &
+        (df["dispute_rate_30d"]    > 0.05) &
+        (df["cash_trip_ratio_30d"] > 0.40)
+    )
+    risk_drivers = df[risk_mask].copy()
 
-    if len(chronic_drivers) == 0:
+    if len(risk_drivers) == 0:
         return df
 
     # 60% join rings, 40% solo
-    join_ring = rng.random(len(chronic_drivers)) < 0.60
-    ring_candidates = chronic_drivers[join_ring]
+    join_ring_mask = rng.random(len(risk_drivers)) < 0.60
+    ring_candidates = risk_drivers[join_ring_mask]
 
     ring_counter = 1
     processed_ids: set = set()
 
-    for (city, zone), group in ring_candidates.groupby(["city", "zone_id"]):
-        group_ids = list(group.index)
-        rng.shuffle(group_ids)
+    for (city, zone_id), group in ring_candidates.groupby(["city", "zone_id"]):
+        group_idx = list(group.index)
+        rng.shuffle(group_idx)
 
         i = 0
-        while i < len(group_ids):
-            ring_size = int(rng.integers(3, 7))
-            ring_members = group_ids[i:i + ring_size]
+        while i < len(group_idx):
+            ring_size    = int(rng.integers(3, 7))
+            ring_members = group_idx[i : i + ring_size]
 
             if len(ring_members) < 2:
                 for idx in ring_members:
@@ -223,22 +236,23 @@ def assign_fraud_rings(
             ring_id = f"RING_{city[:3].upper()}_{ring_counter:03d}"
             ring_counter += 1
 
+            # Leader = highest cancel rate (observable signal)
             leader_idx = max(
                 ring_members,
-                key=lambda idx: df.at[idx, "fraud_propensity"],
+                key=lambda idx: df.at[idx, "cancel_rate_30d"],
             )
 
             for idx in ring_members:
                 df.at[idx, "fraud_ring_id"] = ring_id
-                df.at[idx, "ring_role"] = (
+                df.at[idx, "ring_role"]     = (
                     "leader" if idx == leader_idx else "member"
                 )
                 processed_ids.add(idx)
 
             i += ring_size
 
-    # Mark remaining chronic fraudsters as solo
-    for idx in chronic_drivers.index:
+    # Mark remaining risk drivers as solo
+    for idx in risk_drivers.index:
         if idx not in processed_ids:
             df.at[idx, "ring_role"] = "solo"
 
@@ -252,16 +266,10 @@ def generate_drivers(
     """
     Generate n Porter driver profiles as a DataFrame.
 
-    Args:
-        n:           Number of driver profiles to generate.
-        city_filter: If set, all drivers belong to this city.
-                     If None, distributed across bangalore/mumbai/delhi.
-
-    Returns:
-        DataFrame with all driver fields. fraud_propensity is included
-        for internal model training — never expose externally.
+    Schema v2: No fraud_propensity field.
+    All behavioral signals are observable and derivable from trip history.
     """
-    today = datetime.now().date()
+    today   = datetime.now().date()
     records = []
 
     with Progress(
@@ -271,7 +279,7 @@ def generate_drivers(
         TextColumn("[green]{task.completed}/{task.total}"),
         console=console,
     ) as progress:
-        task = progress.add_task("Generating driver profiles...", total=n)
+        task = progress.add_task("Generating driver profiles v2...", total=n)
 
         for _ in range(n):
             # ── Identity ──────────────────────────────────────
@@ -280,7 +288,7 @@ def generate_drivers(
             phone     = generate_indian_phone(rng)
 
             # ── City ──────────────────────────────────────────
-            city = city_filter if city_filter else rng.choice(CITIES[:3])
+            city = city_filter if city_filter else str(rng.choice(CITIES[:3]))
 
             # ── Vehicle type ──────────────────────────────────
             vehicle_type = str(rng.choice(
@@ -289,84 +297,131 @@ def generate_drivers(
             ))
 
             # ── Joining date ──────────────────────────────────
+            # 60% experienced (2-6 years), 40% newer (1 month – 2 years)
             if rng.random() < 0.60:
-                days_ago = int(rng.integers(365 * 2, 365 * 6))   # experienced
+                days_ago = int(rng.integers(365 * 2, 365 * 6))
             else:
-                days_ago = int(rng.integers(30, 365 * 2))         # newer
+                days_ago = int(rng.integers(30, 365 * 2))
             joining_date     = today - timedelta(days=days_ago)
             account_age_days = days_ago
 
-            # ── Verification and payment ──────────────────────
-            verification_status = str(rng.choice(
-                ["verified", "unverified", "pending"],
-                p=[0.75, 0.15, 0.10],
+            # ── Document verification (KYC) ───────────────────
+            # 75% fully verified, 15% pending, 10% unverified
+            kyc_status = str(rng.choice(
+                ["verified", "pending", "unverified", "expired"],
+                p=[0.75, 0.12, 0.10, 0.03],
             ))
+            aadhaar_verified    = kyc_status == "verified" or rng.random() < 0.82
+            dl_verified         = kyc_status == "verified" or rng.random() < 0.78
+            vehicle_rc_verified = kyc_status == "verified" or rng.random() < 0.80
+            bank_verified       = kyc_status == "verified" or rng.random() < 0.85
+
+            # DL expiry (5-10 years from joining, ~5% expired)
+            dl_years = float(rng.uniform(1, 10))
+            dl_expiry = joining_date + timedelta(days=int(dl_years * 365))
+            dl_expired = dl_expiry < today
+
+            # ── Payment preference ────────────────────────────
+            # Note: bank_account_type is how Porter pays the driver
             bank_account_type = str(rng.choice(
                 ["upi", "bank", "cash"],
                 p=[0.65, 0.25, 0.10],
             ))
 
-            # ── Rating and cancellation ───────────────────────
-            rating            = float(np.clip(rng.normal(4.2, 0.4), 1.0, 5.0))
-            cancellation_rate = float(np.clip(rng.beta(1.5, 8.0) * 0.35, 0.0, 0.35))
+            # ── Zone ─────────────────────────────────────────
+            zone_id = assign_driver_zone(city, rng)
 
-            # ── Fraud propensity (computed early for zone bias) ──
-            base_propensity  = sample_base_fraud_propensity(rng)
-            fraud_propensity = compute_fraud_propensity(
-                bank_account_type   = bank_account_type,
-                verification_status = verification_status,
-                account_age_days    = account_age_days,
-                rating              = rating,
-                cancellation_rate   = cancellation_rate,
-                base_propensity     = base_propensity,
+            # ── Behavioral stats (30-day rolling) ─────────────
+            behavior = sample_behavioral_stats(
+                account_age_days, vehicle_type, city, rng
             )
 
-            # ── Zone assignment (chronic fraudsters → commercial) ──
-            zone_id = assign_driver_zone(city, fraud_propensity, rng)
-
-            # ── Trip and earnings history ─────────────────────
-            base_trips            = account_age_days * rng.normal(2.5, 0.8)
-            total_trips_lifetime  = max(0, int(base_trips))
-
-            veh             = VEHICLE_TYPES[vehicle_type]
-            avg_fare        = veh.base_fare + veh.per_km_rate * 8
-            trips_per_month = max(1, int(total_trips_lifetime / max(1, account_age_days / 30)))
-            # Porter takes ~20% commission; add earnings variance
+            # ── Lifetime stats ────────────────────────────────
+            base_trips           = account_age_days * rng.normal(2.5, 0.8)
+            total_trips_lifetime = max(0, int(base_trips))
+            veh                  = VEHICLE_TYPES[vehicle_type]
+            avg_fare_lifetime    = veh.base_fare + veh.per_km_rate * 8
+            trips_per_month      = max(1, int(
+                total_trips_lifetime / max(1, account_age_days / 30)
+            ))
             monthly_earnings_avg = float(
-                trips_per_month * avg_fare * 0.80 * rng.normal(1.0, 0.15)
+                trips_per_month * avg_fare_lifetime * 0.80
+                * rng.normal(1.0, 0.15)
             )
 
-            # ── Activity and churn ────────────────────────────
+            # ── Activity ──────────────────────────────────────
             is_active = bool(rng.random() < 0.95)
 
+            # ── Churn risk (derived from observable signals) ──
             churn_base = 0.10
             if account_age_days < 90:
                 churn_base += 0.20
             if monthly_earnings_avg < 8_000:
                 churn_base += 0.15
-            if rating < 3.8:
+            if behavior["avg_rating_30d"] < 3.8:
                 churn_base += 0.20
-            churn_risk = float(np.clip(churn_base + rng.normal(0, 0.05), 0.0, 1.0))
+            churn_risk = float(np.clip(
+                churn_base + rng.normal(0, 0.05), 0.0, 1.0
+            ))
+
+            # ── Device risk signals ───────────────────────────
+            # Shared device: same phone used for multiple accounts
+            # (small probability — increases for new/unverified accounts)
+            shared_device_prob = 0.02 if kyc_status == "verified" else 0.08
+            shared_device_flag = bool(rng.random() < shared_device_prob)
+
+            # Duplicate account: same aadhaar/phone on another account
+            dup_account_prob = 0.01 if kyc_status == "verified" else 0.05
+            duplicate_account_flag = bool(rng.random() < dup_account_prob)
+
+            # Document mismatch (name vs RC vs DL)
+            doc_mismatch = not dl_verified or not vehicle_rc_verified
 
             records.append({
-                "driver_id":             driver_id,
-                "name":                  name,
-                "phone":                 phone,
-                "city":                  city,
-                "zone_id":               zone_id,
-                "vehicle_type":          vehicle_type,
-                "joining_date":          str(joining_date),
-                "account_age_days":      account_age_days,
-                "verification_status":   verification_status,
-                "bank_account_type":     bank_account_type,
-                "rating":                round(rating, 2),
-                "cancellation_rate":     round(cancellation_rate, 4),
-                "total_trips_lifetime":  total_trips_lifetime,
-                "monthly_earnings_avg":  round(monthly_earnings_avg, 2),
-                "is_active":             is_active,
-                "churn_risk":            round(churn_risk, 4),
-                "fraud_propensity":      round(fraud_propensity, 4),
-                # ⚠️  INTERNAL LABEL — never expose via API
+                # ── Identity ──────────────────────────────────
+                "driver_id":               driver_id,
+                "name":                    name,
+                "phone":                   phone,
+                "city":                    city,
+                "zone_id":                 zone_id,
+                "vehicle_type":            vehicle_type,
+
+                # ── Account ───────────────────────────────────
+                "joining_date":            str(joining_date),
+                "account_age_days":        account_age_days,
+                "is_active":               is_active,
+
+                # ── Document KYC ──────────────────────────────
+                "kyc_status":              kyc_status,
+                "aadhaar_verified":        aadhaar_verified,
+                "dl_verified":             dl_verified,
+                "dl_expired":              dl_expired,
+                "vehicle_rc_verified":     vehicle_rc_verified,
+                "bank_account_verified":   bank_verified,
+                "bank_account_type":       bank_account_type,
+
+                # ── Behavioral stats (30-day rolling) ─────────
+                # These are the ONLY risk signals exposed to the model
+                **behavior,
+
+                # ── Lifetime ──────────────────────────────────
+                "total_trips_lifetime":    total_trips_lifetime,
+                "monthly_earnings_avg":    round(monthly_earnings_avg, 2),
+                "churn_risk":              round(churn_risk, 4),
+
+                # ── Device risk ───────────────────────────────
+                "shared_device_flag":      shared_device_flag,
+                "duplicate_account_flag":  duplicate_account_flag,
+                "document_mismatch_flag":  doc_mismatch,
+
+                # ── Ring membership (structural metadata) ─────
+                # Populated by assign_fraud_rings() below
+                "fraud_ring_id":           None,
+                "ring_role":               None,
+
+                # ── NO fraud_propensity field ──────────────────
+                # Removed: was a leaked training label.
+                # Fraud is inferred from the behavioral stats above.
             })
 
             progress.advance(task)
@@ -377,128 +432,77 @@ def generate_drivers(
 
 
 if __name__ == "__main__":
-    console.rule("[cyan]Driver Generator — Validation[/cyan]")
+    console.rule("[cyan]Driver Generator v2 — Validation[/cyan]")
 
     df = generate_drivers(n=1_000, city_filter="bangalore")
 
-    # ── Assertion checks ──────────────────────────────────────
-    assert len(df) == 1_000,                              "Row count mismatch"
-    assert df["driver_id"].nunique() == 1_000,            "Duplicate IDs found"
-    assert df["phone"].str.match(r"^\+91[6-9]\d{9}$").all(), \
-        "Invalid phone numbers"
-    assert df["rating"].between(1.0, 5.0).all(),          "Rating out of range"
-    assert df["cancellation_rate"].between(0.0, 0.35).all(), \
-        "Cancellation rate out of range"
-    assert df["fraud_propensity"].between(0.0, 1.0).all(), \
-        "Fraud propensity out of range"
+    # ── Schema checks ─────────────────────────────────────────
+    assert "fraud_propensity" not in df.columns, \
+        "fraud_propensity must NOT be in driver schema v2"
+    assert "fraud_ring_id" in df.columns, \
+        "fraud_ring_id must be present"
+    assert "kyc_status" in df.columns, \
+        "kyc_status must be present"
+    assert "cancel_rate_30d" in df.columns, \
+        "cancel_rate_30d must be present"
 
-    # ── Fraud propensity distribution ─────────────────────────
-    honest     = (df["fraud_propensity"] <= 0.15).mean()
-    occasional = df["fraud_propensity"].between(0.15, 0.50).mean()
-    chronic    = (df["fraud_propensity"] >  0.50).mean()
+    # ── Core assertions ───────────────────────────────────────
+    assert len(df) == 1_000,               "Row count mismatch"
+    assert df["driver_id"].nunique() == 1_000, "Duplicate IDs"
+    assert df["avg_rating_30d"].between(1.0, 5.0).all(), "Rating range"
+    assert df["cancel_rate_30d"].between(0.0, 0.55).all(), "Cancel rate range"
+    assert df["cash_trip_ratio_30d"].between(0.0, 1.0).all(), "Cash ratio range"
 
-    table1 = Table(title="Fraud Propensity Distribution (n=1,000)")
-    table1.add_column("Segment",  style="cyan")
-    table1.add_column("Expected", justify="right")
-    table1.add_column("Actual",   justify="right")
-    table1.add_column("Status",   justify="center")
-    table1.add_row("Honest (≤0.15)",       "~91%",
-                   f"{honest * 100:.1f}%",
-                   "✅" if 85 < honest * 100 < 97 else "❌")
-    table1.add_row("Occasional (0.15-0.5)", "~6%",
-                   f"{occasional * 100:.1f}%",
-                   "✅" if 2 < occasional * 100 < 12 else "❌")
-    table1.add_row("Chronic (>0.50)",       "~3%",
-                   f"{chronic * 100:.1f}%",
-                   "✅" if 0.5 < chronic * 100 < 8 else "❌")
+    # ── Behavioral distribution check ─────────────────────────
+    low_risk  = (df["cancel_rate_30d"] < 0.10).mean()
+    mid_risk  = df["cancel_rate_30d"].between(0.10, 0.30).mean()
+    high_risk = (df["cancel_rate_30d"] > 0.30).mean()
+
+    table1 = Table(title="Behavioral Risk Distribution (n=1,000)")
+    table1.add_column("Segment",    style="cyan")
+    table1.add_column("Cancel Rate", justify="right")
+    table1.add_column("Actual %",   justify="right")
+    table1.add_column("Status",     justify="center")
+    table1.add_row("Low risk",  "< 10%",    f"{low_risk*100:.1f}%",
+                   "✅" if low_risk > 0.75 else "❌")
+    table1.add_row("Mid risk",  "10–30%",   f"{mid_risk*100:.1f}%",
+                   "✅" if 0.03 < mid_risk < 0.20 else "❌")
+    table1.add_row("High risk", "> 30%",    f"{high_risk*100:.1f}%",
+                   "✅" if high_risk < 0.08 else "❌")
     console.print(table1)
 
-    # ── Correlation checks ────────────────────────────────────
-    cash_fraud    = df[df["bank_account_type"] == "cash"]["fraud_propensity"].mean()
-    upi_fraud     = df[df["bank_account_type"] == "upi"]["fraud_propensity"].mean()
-    assert cash_fraud > upi_fraud, \
-        f"Cash fraud {cash_fraud:.4f} must exceed UPI fraud {upi_fraud:.4f}"
-
-    unverif_fraud  = df[df["verification_status"] == "unverified"]["fraud_propensity"].mean()
-    verified_fraud = df[df["verification_status"] == "verified"]["fraud_propensity"].mean()
-    assert unverif_fraud > verified_fraud, \
-        "Unverified drivers must be riskier than verified"
-
-    # ── Summary stats ─────────────────────────────────────────
-    table2 = Table(title="Driver Profile Summary (n=1,000)")
-    table2.add_column("Metric", style="cyan")
-    table2.add_column("Value",  style="green")
-    table2.add_row("Avg rating",           f"{df['rating'].mean():.2f}")
-    table2.add_row("Avg cancellation",     f"{df['cancellation_rate'].mean():.3f}")
-    table2.add_row("Avg fraud propensity", f"{df['fraud_propensity'].mean():.4f}")
-    table2.add_row("Cash pref fraud avg",  f"{cash_fraud:.4f}")
-    table2.add_row("UPI pref fraud avg",   f"{upi_fraud:.4f}")
-    table2.add_row("Unverified fraud avg", f"{unverif_fraud:.4f}")
-    table2.add_row("Verified fraud avg",   f"{verified_fraud:.4f}")
-    table2.add_row("Active drivers",
-                   f"{df['is_active'].sum()} ({df['is_active'].mean() * 100:.1f}%)")
-    table2.add_row("Unique zones",         str(df["zone_id"].nunique()))
+    # ── KYC distribution ──────────────────────────────────────
+    table2 = Table(title="KYC Status Distribution")
+    table2.add_column("Status",  style="cyan")
+    table2.add_column("Count",   justify="right")
+    table2.add_column("Pct",     justify="right")
+    for status in ["verified", "pending", "unverified", "expired"]:
+        cnt = (df["kyc_status"] == status).sum()
+        table2.add_row(status, str(cnt), f"{cnt/10:.1f}%")
     console.print(table2)
 
-    # ── Fix 1 validation — zone bias for chronic fraudsters ────
-    chronic_drivers = df[df["fraud_propensity"] > 0.50]
-    if len(chronic_drivers) > 5:
-        chronic_zones = chronic_drivers["zone_id"].value_counts()
-        honest_drivers = df[df["fraud_propensity"] <= 0.15]
-        honest_zones = honest_drivers["zone_id"].value_counts()
+    # ── Ring structure ────────────────────────────────────────
+    ring_drivers = df["fraud_ring_id"].notna().sum()
+    solo_drivers = (df["ring_role"] == "solo").sum()
+    ring_count   = df["fraud_ring_id"].dropna().nunique()
 
-        top_chronic_zone = chronic_zones.index[0]
-        top_honest_zone  = honest_zones.index[0]
+    table3 = Table(title="Ring Structure (observable-signal based)")
+    table3.add_column("Metric",  style="cyan")
+    table3.add_column("Value",   style="green")
+    table3.add_row("Ring members", str(ring_drivers))
+    table3.add_row("Solo risk drivers", str(solo_drivers))
+    table3.add_row("Total rings", str(ring_count))
+    console.print(table3)
 
-        console.print(f"\n[cyan]Zone bias check:[/cyan]")
-        console.print(f"  Top chronic zone: {top_chronic_zone} "
-                      f"(fraud_adj: "
-                      f"{ZONES[top_chronic_zone].fraud_rate_adj:.3f})")
-        console.print(f"  Top honest zone:  {top_honest_zone} "
-                      f"(fraud_adj: "
-                      f"{ZONES[top_honest_zone].fraud_rate_adj:.3f})")
+    # ── Validate no fraud_propensity exists ───────────────────
+    assert "fraud_propensity" not in df.columns, \
+        "❌ fraud_propensity leaked into schema"
+    console.print(
+        "[green]✅ fraud_propensity correctly absent from schema[/green]"
+    )
 
-    # ── Fix 2 validation — fraud rings ────────────────────────
-    ring_table = Table(title="Fraud Ring Structure")
-    ring_table.add_column("Metric", style="cyan")
-    ring_table.add_column("Value",  style="green")
-
-    chronic_total = (df["fraud_propensity"] > 0.50).sum()
-    ring_members  = df["fraud_ring_id"].notna().sum()
-    solo_count    = (df["ring_role"] == "solo").sum()
-    ring_count    = df["fraud_ring_id"].dropna().nunique()
-
-    ring_table.add_row("Chronic fraudsters", str(chronic_total))
-    ring_table.add_row("In rings",           str(ring_members))
-    ring_table.add_row("Solo operators",      str(solo_count))
-    ring_table.add_row("Total rings",         str(ring_count))
-
-    if chronic_total > 0:
-        ring_pct = ring_members / chronic_total * 100
-        ring_table.add_row(
-            "Ring participation rate",
-            f"{ring_pct:.1f}% (target ~60%)",
-        )
-
-    console.print(ring_table)
-
-    if ring_count > 0:
-        # Each ring must have exactly one leader
-        leaders = df[df["ring_role"] == "leader"]
-        ring_leader_counts = leaders["fraud_ring_id"].value_counts()
-        assert (ring_leader_counts == 1).all(), \
-            "Each ring must have exactly one leader"
-        console.print("[green]✅ Ring leadership structure valid[/green]")
-
-        # Ring members must share the same zone
-        for ring_id in df[df["fraud_ring_id"].notna()]["fraud_ring_id"].unique():
-            ring = df[df["fraud_ring_id"] == ring_id]
-            assert ring["zone_id"].nunique() == 1, \
-                f"Ring {ring_id} spans multiple zones — invalid"
-        console.print("[green]✅ All rings are zone-contained[/green]")
-
-    # ── Save sample ───────────────────────────────────────────
+    # ── Save ──────────────────────────────────────────────────
     sample_path = DATA_RAW / "drivers_sample_1000.csv"
     df.to_csv(sample_path, index=False)
-    console.print(f"\n[green]✅ Sample saved to {sample_path}[/green]")
-    console.print("[green bold]✅ drivers.py — all checks passed[/green bold]")
+    console.print(f"\n[green]✅ Sample saved → {sample_path}[/green]")
+    console.print("[green bold]✅ drivers.py v2 — all checks passed[/green bold]")

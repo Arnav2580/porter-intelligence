@@ -63,11 +63,13 @@ async def precompute_driver_features(
                 continue
 
             fraud_rate = float(driver_trips["is_fraud"].mean())
+            # Support both v1 (status) and v2 (trip_status) schema
+            status_col = "trip_status" if "trip_status" in driver_trips.columns else "status"
             cancel_rate = float(
-                driver_trips["status"].isin(
+                driver_trips[status_col].isin(
                     ["cancelled_by_driver"]
                 ).mean()
-            )
+            ) if status_col in driver_trips.columns else 0.0
             cash_ratio = float(
                 (driver_trips["payment_mode"] == "cash").mean()
             )
@@ -80,9 +82,10 @@ async def precompute_driver_features(
             recent_trips = driver_trips[
                 driver_trips["requested_at"] >= cutoff_14d
             ]
+            status_col = "trip_status" if "trip_status" in driver_trips.columns else "status"
             dispute_rate_14d = float(
-                (recent_trips["status"] == "disputed").mean()
-            ) if len(recent_trips) > 0 else 0.0
+                (recent_trips[status_col] == "disputed").mean()
+            ) if len(recent_trips) > 0 and status_col in recent_trips.columns else 0.0
 
             # Driver profile features (O(1) lookup via pre-indexed DataFrame)
             account_age = 180

@@ -16,11 +16,6 @@ const EMPTY_KPI = {
   indicative_annual_recovery_crore: 0,
 };
 
-const fmtInt = (n) => (Number(n) || 0).toLocaleString('en-IN');
-const fmtPct = (n) => `${(Number(n) || 0).toFixed(1)}%`;
-const fmtInr = (n) => `\u20B9${(Number(n) || 0).toFixed(2)}`;
-const fmtCr  = (n) => `\u20B9${(Number(n) || 0).toFixed(2)} Cr`;
-
 function MetricCard({ value, label, sub, highlight }) {
   return (
     <div style={{

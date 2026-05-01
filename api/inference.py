@@ -494,8 +494,8 @@ async def kpi_report(
         return {}
 
     two_stage = app_state.get("two_stage_config") or {}
-    watchlist_threshold = two_stage.get("watchlist_threshold", 0.45)
-    action_threshold    = two_stage.get("action_threshold", 0.94)
+    watchlist_threshold = two_stage.get("watchlist_threshold", 0.50)
+    action_threshold    = two_stage.get("action_threshold", 0.80)
 
     def _sanitize(value):
         if isinstance(value, dict):

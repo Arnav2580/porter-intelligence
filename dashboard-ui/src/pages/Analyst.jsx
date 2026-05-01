@@ -98,14 +98,14 @@ function signalDetail(signal) {
 }
 
 function probColor(probability) {
-  if (probability > 0.94) return 'var(--danger)';
-  if (probability > 0.45) return 'var(--warning)';
+  if (probability >= 0.80) return 'var(--danger)';
+  if (probability >= 0.50) return 'var(--warning)';
   return 'var(--success)';
 }
 
 function probClass(probability) {
-  if (probability > 0.94) return 'high';
-  if (probability > 0.45) return 'medium';
+  if (probability >= 0.80) return 'high';
+  if (probability >= 0.50) return 'medium';
   return 'low';
 }
 
