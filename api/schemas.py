@@ -13,23 +13,26 @@ class TripScoreRequest(BaseModel):
     driver_id:             str
     vehicle_type:          str
     pickup_zone_id:        str
-    dropoff_zone_id:       str
     pickup_lat:            float
     pickup_lon:            float
     dropoff_lat:           float
     dropoff_lon:           float
     declared_distance_km:  float
-    declared_duration_min: float
     fare_inr:              float
-    payment_mode:          str          # upi / cash / credit
-    surge_multiplier:      float
-    requested_at:          str          # ISO datetime string
-    is_night:              bool
-    hour_of_day:           int
-    day_of_week:           int
-    is_peak_hour:          bool
-    zone_demand_at_time:   float
-    status:                str
+    payment_mode:          str                   # upi / cash / credit
+
+    # Optional — derived from completed_at or defaulted when absent
+    dropoff_zone_id:       Optional[str] = None
+    declared_duration_min: float = 30.0
+    surge_multiplier:      float = 1.0
+    zone_demand_at_time:   float = 1.0
+    status:                str = "completed"
+    completed_at:          Optional[str] = None
+    requested_at:          Optional[str] = None  # ISO datetime string
+    is_night:              Optional[bool] = None
+    hour_of_day:           Optional[int] = None
+    day_of_week:           Optional[int] = None
+    is_peak_hour:          Optional[bool] = None
     customer_complaint_flag: bool = False
 
 
