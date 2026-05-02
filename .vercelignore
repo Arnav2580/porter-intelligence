@@ -9,7 +9,9 @@ logs/
 data/
 .env
 .git/
-api/
+api/*.py
+api/routes/
+api/__pycache__/
 ml/
 model/
 auth/
