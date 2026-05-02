@@ -180,12 +180,6 @@ function Header({
               <div className="live-dot" style={{ background: modeColor, animation: runtimeMeta.synthetic_feed_enabled ? 'pulse-dot 2s infinite' : 'none' }} />
               {modeLabel}
             </div>
-            <div style={{ fontSize: 10, color: 'var(--muted)', maxWidth: 220, textAlign: 'right', lineHeight: 1.4 }}>
-              {runtimeMeta.data_provenance}
-            </div>
-            <div style={{ fontSize: 10, color: 'var(--muted)', maxWidth: 220, textAlign: 'right', lineHeight: 1.4 }}>
-              Mapping proof: <span style={{ color: 'var(--orange)' }}>/ingest/schema-map/default</span>
-            </div>
           </div>
         ) : null}
         {canResetDemo ? (

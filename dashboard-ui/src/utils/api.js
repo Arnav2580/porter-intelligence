@@ -110,6 +110,7 @@ export async function apiGet(path) {
     await handle401()
     throw new Error('API error: 401 Unauthorized')
   }
+  if (res.status === 403) throw new Error('Access denied. Your role cannot perform this action.')
   if (!res.ok) throw new Error(`API error: ${res.status}`)
   return res.json()
 }
@@ -129,6 +130,7 @@ export async function apiPost(path, body) {
     await handle401()
     throw new Error('API error: 401 Unauthorized')
   }
+  if (res.status === 403) throw new Error('Access denied. Your role cannot perform this action.')
   if (!res.ok) throw new Error(`API error: ${res.status}`)
   return res.json()
 }

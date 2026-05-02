@@ -28,7 +28,8 @@ def _compute_top_risk(
             total_trips  = ("trip_id", "count"),
             fraud_trips  = ("is_fraud", "sum"),
             cancel_trips = (
-                "status",
+                "trip_status" if "trip_status" in trips_df.columns
+                else ("status" if "status" in trips_df.columns else "trip_id"),
                 lambda x: x.isin(
                     ["cancelled_by_driver"]
                 ).sum()

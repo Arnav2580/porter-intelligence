@@ -92,6 +92,7 @@ export default function Dashboard() {
   const [apiStatus, setApiStatus] = useState('checking');
   const [healthMeta, setHealthMeta] = useState(null);
   const [kpi, setKpi] = useState(EMPTY_KPI);
+  const [benchmarkKpi, setBenchmarkKpi] = useState(null);
   const [scorerOpen, setScorerOpen] = useState(false);
 
   const doHealthCheck = async () => {
@@ -114,6 +115,13 @@ export default function Dashboard() {
       const data = await apiGet('/kpi/live');
       setKpi({ ...EMPTY_KPI, ...data });
     } catch { /* keep prior KPI snapshot */ }
+  };
+
+  const fetchBenchmarkKpi = async () => {
+    try {
+      const data = await apiGet('/kpi/summary');
+      setBenchmarkKpi(data);
+    } catch { /* non-critical, keep null */ }
   };
 
   useEffect(() => {
@@ -139,6 +147,11 @@ export default function Dashboard() {
     return () => { cancelled = true; clearInterval(t); };
   }, [apiStatus]);
 
+  useEffect(() => {
+    if (apiStatus !== 'online') return;
+    fetchBenchmarkKpi();
+  }, [apiStatus]);
+
   if (apiStatus === 'checking') {
     return (
       <div style={{
@@ -161,8 +174,8 @@ export default function Dashboard() {
     || ((kpi.action_tier_24h || 0) + (kpi.watchlist_tier_24h || 0));
   const actionCount  = kpi.action_tier_24h || 0;
   const scoreAvg     = kpi.action_score_avg_pct || 0;
-  const recPerTrip   = kpi.estimated_recoverable_per_trip || 0;
-  const annualCrore  = kpi.indicative_annual_recovery_crore || 0;
+  const recPerTrip   = benchmarkKpi?.net_recoverable_per_trip ?? kpi.estimated_recoverable_per_trip ?? 0;
+  const annualCrore  = benchmarkKpi?.projected_annual_recovery_crore ?? kpi.indicative_annual_recovery_crore ?? 0;
 
   return (
     <div style={{
@@ -289,7 +302,7 @@ export default function Dashboard() {
           display: 'flex',
           flexDirection: 'column',
         }}>
-          <FraudFeed thresholds={healthMeta?.thresholds} />
+          <FraudFeed thresholds={healthMeta?.thresholds} runtimeMode={runtimeMode} />
         </div>
 
         {/* Center: Map */}

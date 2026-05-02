@@ -103,7 +103,7 @@ function TripPopup({ trip, tier, onClose }) {
   );
 }
 
-export default function FraudFeed({ thresholds }) {
+export default function FraudFeed({ thresholds, runtimeMode }) {
   const [items, setItems]             = useState([]);
   const [isBenchmark, setIsBenchmark] = useState(true);
   const [error, setError]             = useState(false);
@@ -148,11 +148,12 @@ export default function FraudFeed({ thresholds }) {
     t === 'action' ? 'ACTION' :
     t === 'watchlist' ? 'WATCH' : 'CLEAR';
 
-  const feedLabel     = isBenchmark ? 'BENCHMARK DATA' : 'LIVE';
-  const feedLabelColor = isBenchmark ? 'var(--warning)' : 'var(--success)';
-  const feedSubLabel  = isBenchmark
-    ? '100k-trip evaluation set · start simulator for live feed'
-    : `Refreshes every 3s · Showing ${items.length} cases`;
+  const effectivelyLive = !isBenchmark || runtimeMode === 'prod';
+  const feedLabel     = effectivelyLive ? 'LIVE' : 'BENCHMARK DATA';
+  const feedLabelColor = effectivelyLive ? 'var(--success)' : 'var(--warning)';
+  const feedSubLabel  = effectivelyLive
+    ? `Refreshes every 3s · Showing ${items.length} cases`
+    : '100k-trip evaluation set · start simulator for live feed';
 
   return (
     <div className="col feed-col" style={{ padding: 0 }}>
@@ -164,7 +165,7 @@ export default function FraudFeed({ thresholds }) {
           <div className="feed-count" style={{ color: 'var(--muted)' }}>
             Real-time trip scoring &middot; Behavioral signals only &middot; Identity controls handled by upstream systems
           </div>
-          <div className="feed-count" style={{ color: isBenchmark ? 'var(--warning)' : 'var(--muted)', marginTop: 4 }}>
+          <div className="feed-count" style={{ color: effectivelyLive ? 'var(--muted)' : 'var(--warning)', marginTop: 4 }}>
             {feedSubLabel}
           </div>
         </div>
